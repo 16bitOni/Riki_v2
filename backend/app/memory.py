@@ -1,9 +1,30 @@
 """riki-mem wired to the same LangChain models the agent uses (one provider config for everything)."""
 
+import json
+from functools import cache
+from typing import get_origin
+
 from langchain_core.embeddings import Embeddings
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
+from pydantic import field_validator
 from riki_memory import telemetry
+
+
+@cache
+def lenient(schema):
+    """The same schema, but a list the model sent as a JSON string ('[{...}]', as Kimi sometimes does) is read as the
+    list. The check that rejected it runs inside the OpenAI client, so it has to be fixed in the schema."""
+    def unquote(cls, value, info):
+        if isinstance(value, str) and value.lstrip().startswith("[") and get_origin(cls.model_fields[info.field_name].annotation) is list:
+            try:
+                return json.loads(value)
+            except ValueError:
+                pass
+        return value
+
+    return type(schema.__name__, (schema,), {"__module__": schema.__module__,
+                                             "_unquote": field_validator("*", mode="before")(classmethod(unquote))})
 
 
 class LangChainProvider:
@@ -14,7 +35,7 @@ class LangChainProvider:
         self.embedding_model_id = embedding_model_id
 
     async def chat_json(self, system: str, user: str, schema, *, fast: bool = True):
-        model = (self.fast if fast else self.smart).with_structured_output(schema, include_raw=True)
+        model = (self.fast if fast else self.smart).with_structured_output(lenient(schema), include_raw=True)
         out = await model.ainvoke([SystemMessage(system), HumanMessage(user)])
         usage = getattr(out["raw"], "usage_metadata", None) or {}
         telemetry.record_model_call(usage.get("input_tokens", 0), usage.get("output_tokens", 0))

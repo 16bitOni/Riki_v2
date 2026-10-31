@@ -3,6 +3,7 @@
 import asyncio
 import json
 import socket
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 import pytest
@@ -12,6 +13,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 from app import apps as apps_mod
+from app import google
 from app.agent.policy import EXTERNAL, SAFE, WRITE
 from app.apps import hub_args_reach_people, reaches_people, secret_box, tool_risk
 from app.main import app
@@ -122,6 +124,11 @@ async def test_connect_modes_and_disconnect(make_runtime, notes_server):
         # a token app can't connect without its token; a sign-in nobody started is refused
         assert (await client.post("/api/apps/github/connect", json={})).status_code == 400
         await client.delete("/api/apps/github")
+
+        # a Google app only takes a real OAuth client ID (Google answers anything else "invalid_client")
+        bad = await client.post("/api/apps/gmail/connect", json={"client_id": "ya29.not-a-client-id", "client_secret": "x"})
+        assert bad.status_code == 400 and "client ID" in bad.json()["detail"]
+        await client.delete("/api/apps/gmail")
         assert (await client.get("/api/apps/callback?state=nope&code=x")).status_code == 400
 
 
@@ -236,3 +243,130 @@ async def test_sign_in_flow_stores_tokens_and_reconnects_without_you(make_runtim
     finally:
         server.should_exit = True
         await task
+
+
+async def test_a_server_that_lists_tools_without_a_token_still_gets_you_signed_in(make_runtime):
+    # Bug seen in real use (Gmail): initialize and tools/list work without a token, only a call answers 401. The app
+    # showed "connected", never offered a sign-in, and every call then waited out the tool timeout.
+    from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
+
+    port = _free_port()
+    base = f"http://127.0.0.1:{port}"
+    srv = FastMCP("mail", host="127.0.0.1", port=port, stateless_http=True, auth_server_provider=_AuthServer(),
+                  auth=AuthSettings(issuer_url=base, resource_server_url=f"{base}/mcp",
+                                    client_registration_options=ClientRegistrationOptions(enabled=True),
+                                    validate_token_resource=False))
+
+    @srv.tool(annotations=ToolAnnotations(readOnlyHint=True))
+    def read_mail() -> str:
+        """Today's mail."""
+        return "one new message"
+
+    inner = srv.streamable_http_app()
+    listing = {"name": "read_mail", "description": "Today's mail.", "inputSchema": {"type": "object", "properties": {}},
+               "annotations": {"readOnlyHint": True}}
+
+    async def gate(scope, receive, send):  # answer the handshake and the tool list without a token, like Google
+        if scope["type"] != "http" or scope["path"] != "/mcp" or b"authorization" in dict(scope["headers"]):
+            return await inner(scope, receive, send)
+        body = b""
+        while True:
+            msg = await receive()
+            body += msg.get("body", b"")
+            if not msg.get("more_body"):
+                break
+        rpc = json.loads(body or b"{}")
+        result = {"initialize": {"protocolVersion": rpc.get("params", {}).get("protocolVersion", "2025-03-26"),
+                                 "capabilities": {"tools": {}}, "serverInfo": {"name": "mail", "version": "1"}},
+                  "tools/list": {"tools": [listing]}}.get(rpc.get("method"))
+        if result is None and not rpc.get("method", "").startswith("notifications/"):
+            replay = iter([{"type": "http.request", "body": body}])  # a tool call: the real server answers 401
+            return await inner(scope, lambda: _next(replay), send)
+        status, payload = (200, json.dumps({"jsonrpc": "2.0", "id": rpc["id"], "result": result}).encode()) if result \
+            else (202, b"")
+        await send({"type": "http.response.start", "status": status, "headers": [(b"content-type", b"application/json")]})
+        await send({"type": "http.response.body", "body": payload})
+
+    async def _next(it):
+        return next(it)
+
+    server = uvicorn.Server(uvicorn.Config(gate, host="127.0.0.1", port=port, log_level="warning"))
+    task = asyncio.create_task(server.serve())
+    while not server.started:
+        await asyncio.sleep(0.02)
+    rt = await make_runtime(lambda m: AIMessage("hi"))
+    app.state.rt = rt
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            await client.post("/api/login", json={"password": "correct horse battery"})
+            r = (await client.post("/api/apps/custom", json={"name": "Mail", "url": f"{base}/mcp"},
+                                   headers={"Origin": "http://localhost:5173"})).json()
+            assert r["state"] == "signin" and r["auth_url"].startswith(f"{base}/authorize"), r
+            assert rt.registry.get("mail_read_mail") is None  # nothing to call until you are signed in
+
+            async with httpx.AsyncClient() as browser:
+                back = (await browser.get(r["auth_url"])).headers["location"]
+            assert (await client.get(back.removeprefix("http://localhost:5173"))).status_code == 200
+            for _ in range(100):
+                if rt.apps.view_state("mail")["state"] == "connected":
+                    break
+                await asyncio.sleep(0.05)
+            assert rt.apps.view_state("mail")["tools"] == [{"name": "read_mail", "risk": SAFE}]
+            await client.delete("/api/apps/mail")
+    finally:
+        server.should_exit = True
+        await task
+
+
+async def test_gmail_signs_in_with_googles_own_api_and_gets_only_the_tools_the_token_allows(make_runtime, monkeypatch):
+    # Bug seen in real use: Google's Gmail MCP server is a Developer Preview and answered 403 to a normal project.
+    rt = await make_runtime(lambda m: AIMessage("hi"))
+    app.state.rt = rt
+    tokens_asked, gmail_status = [], [200]
+
+    def google_says(req: httpx.Request) -> httpx.Response:
+        if req.url.host == "oauth2.googleapis.com":
+            grant = parse_qs(req.content.decode())["grant_type"][0]
+            tokens_asked.append(grant)
+            body = {"access_token": f"at{len(tokens_asked)}", "expires_in": 3600,
+                    "scope": "https://www.googleapis.com/auth/gmail.readonly"}  # compose left unticked
+            return httpx.Response(200, json=body | ({"refresh_token": "rt"} if grant == "authorization_code" else {}))
+        assert req.headers["authorization"] == f"Bearer at{len(tokens_asked)}"
+        if gmail_status[0] != 200:
+            return httpx.Response(gmail_status[0], json={"error": {"message": "Gmail API has not been used in project 1"}})
+        if req.url.path.endswith("/messages"):
+            return httpx.Response(200, json={"messages": [{"id": "m1"}]})
+        return httpx.Response(200, json={"id": "m1", "snippet": "your invoice", "payload": {"headers": [
+            {"name": "From", "value": "Ana <ana@example.com>"}, {"name": "Subject", "value": "Invoice"},
+            {"name": "Date", "value": "Sat, 31 Oct 2026"}]}})
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        real = httpx.AsyncClient
+        monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: real(**({"transport": httpx.MockTransport(google_says)} | kw)))
+        try:
+            await client.post("/api/login", json={"password": "correct horse battery"})
+            r = (await client.post("/api/apps/gmail/connect", headers={"Origin": "http://localhost:5173"},
+                                   json={"client_id": "1-a.apps.googleusercontent.com", "client_secret": "s"})).json()
+            assert r["state"] == "signin" and r["auth_url"].startswith(google.AUTH_URL), r
+            q = parse_qs(urlparse(r["auth_url"]).query)
+            assert q["access_type"] == ["offline"] and q["scope"] == [apps_mod.CATALOG["gmail"]["scope"]]
+
+            assert (await client.get(f"/api/apps/callback?state={q['state'][0]}&code=abc")).status_code == 200
+            for _ in range(100):
+                if rt.apps.view_state("gmail")["state"] == "connected":
+                    break
+                await asyncio.sleep(0.05)
+            names = {t["name"] for t in rt.apps.view_state("gmail")["tools"]}
+            assert names == {"search", "read", "list_labels"}  # no draft tool: compose was not granted
+            assert "Invoice" in await rt.registry.get("gmail_search").tool.ainvoke({"query": "is:unread"})
+
+            await rt.apps.save_secret("gmail", tokens={**(await rt.apps.secret("gmail"))["tokens"], "expires_at": 0})
+            await rt.registry.get("gmail_search").tool.ainvoke({})  # an expired token is refreshed, not a new sign-in
+            assert tokens_asked == ["authorization_code", "refresh_token"]
+            assert (await rt.apps.secret("gmail"))["tokens"]["refresh_token"] == "rt"
+
+            gmail_status[0] = 403  # Google's own words reach the model: which API is off
+            with pytest.raises(google.GoogleError, match="has not been used in project 1"):
+                await rt.registry.get("gmail_search").tool.ainvoke({})
+        finally:
+            await client.delete("/api/apps/gmail")

@@ -17,9 +17,11 @@ import hashlib
 import json
 import logging
 import re
+import secrets
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
 from cryptography.fernet import Fernet, InvalidToken, MultiFernet
@@ -29,6 +31,7 @@ from mcp.client.auth import OAuthClientProvider
 from mcp.shared.auth import OAuthClientInformationFull, OAuthClientMetadata, OAuthToken
 from sqlalchemy import select, text
 
+from . import google
 from .agent.policy import EXTERNAL, SAFE, WRITE
 from .agent.tools import ToolEntry
 from .db import Connection, utcnow
@@ -225,7 +228,7 @@ class Apps:
 
     async def _serve(self, row: Connection, interactive: bool, stop: asyncio.Event, ready, auth_url) -> None:
         app, names = self.definition(row), []
-        self._status(row.id, state="connecting", error=None, auth_url=None, tools=[])
+        self._status(row.id, state="connecting", error=None, auth_url=None, tools=[], needs_signin=False)
         try:
             if app.get("native"):  # a built-in tool, not an MCP server: check the key, then wait to be disconnected
                 key = (await self.secret(row.id)).get("token")
@@ -237,13 +240,32 @@ class Apps:
                     ready.set_result(True)
                 await stop.wait()
                 return
+            if app.get("rest"):  # Google's own APIs: the token's scopes decide the tools
+                await self._serve_rest(row, app, interactive, stop, ready, auth_url, names)
+                return
             connection = await self._connection(app, row, interactive, auth_url)
             async with MultiServerMCPClient({row.id: connection}).session(row.id) as session:
                 tools = await load_mcp_tools(session, server_name=row.id, tool_name_prefix=True)
+
+                def risk_of(t) -> str:
+                    return tool_risk(app, t.name.removeprefix(f"{row.id}_"), bool((t.metadata or {}).get("readOnlyHint")))
+
+                if app["auth"] in ("oauth", "google") and not (await self.secret(row.id)).get("tokens"):
+                    # Google lists its tools without a token, so nothing has asked for the sign-in yet; a call does (a
+                    # server that wants none just answers). shortcut: the call runs with empty arguments and its result
+                    # is dropped; upgrade if a server ever acts on it.
+                    probe = next((t for t in tools if risk_of(t) == SAFE), None)
+                    if probe is not None:
+                        try:  # interactive: waits here until you finish signing in
+                            await asyncio.wait_for(probe.ainvoke({}), None if interactive else 15)
+                        except Exception:  # refused arguments don't matter, only whether it wanted a sign-in
+                            pass
+                        if self.state[row.id].get("needs_signin") and not (await self.secret(row.id)).get("tokens"):
+                            raise NeedsSignIn()
                 kept = []
                 for t in tools:
                     short = t.name.removeprefix(f"{row.id}_")
-                    risk = tool_risk(app, short, bool((t.metadata or {}).get("readOnlyHint")))
+                    risk = risk_of(t)
                     if row.mode == "read" and risk == WRITE:
                         kept.append((short, "off"))  # read-only: changing tools are never even registered
                         continue
@@ -277,6 +299,55 @@ class Apps:
             if self.live.get(row.id, (None,))[0] is asyncio.current_task():
                 del self.live[row.id]
 
+    async def _serve_rest(self, row: Connection, app: dict, interactive: bool, stop: asyncio.Event, ready, auth_url,
+                          names: list) -> None:
+        tokens = (await self.secret(row.id)).get("tokens") or {}
+        if not tokens.get("refresh_token"):  # none yet, or from the old MCP sign-in, which could not refresh
+            if not interactive:
+                raise NeedsSignIn()
+            tokens = await self._google_sign_in(row.id, app, auth_url)
+        kept = []
+        for entry in google.tools(self, row.id, tokens["scope"].split(), self.rt.settings.timezone):
+            short = entry.tool.name.removeprefix(f"{row.id}_")
+            if row.mode == "read" and entry.risk == WRITE:
+                kept.append((short, "off"))  # read-only: changing tools are never even registered
+                continue
+            self.rt.registry.add(entry)
+            names.append(entry.tool.name)
+            kept.append((short, entry.risk))
+        if not names:
+            raise RuntimeError(f"Google gave {app['name']} no permission to use. Connect again and tick the boxes.")
+        await self.rt.reload_persona()
+        self._status(row.id, state="connected", error=None, auth_url=None, tools=kept)
+        log.info("app %r connected: %d tools from scopes %s", row.id, len(names), tokens["scope"])
+        if ready is not None and not ready.done():
+            ready.set_result(True)
+        await stop.wait()
+
+    async def _google_sign_in(self, app_id: str, app: dict, auth_url) -> dict:
+        """Google's own consent screen (PKCE, offline access so the token can refresh), then the code for tokens."""
+        secret = await self.secret(app_id)
+        client, redirect_uri = secret["client"], secret["redirect_uri"]
+        state, verifier = secrets.token_urlsafe(24), secrets.token_urlsafe(64)
+        challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+        url = google.AUTH_URL + "?" + urlencode({
+            "client_id": client["client_id"], "redirect_uri": redirect_uri, "response_type": "code", "scope": app["scope"],
+            "state": state, "code_challenge": challenge, "code_challenge_method": "S256",
+            "access_type": "offline", "prompt": "consent"})
+        self.flows[state] = asyncio.get_running_loop().create_future()
+        self._status(app_id, state="signin", error=None, auth_url=url)
+        if auth_url is not None and not auth_url.done():
+            auth_url.set_result(url)
+        try:
+            code, _ = await asyncio.wait_for(self.flows[state], 600)
+        except TimeoutError:
+            raise NeedsSignIn() from None
+        finally:
+            self.flows.pop(state, None)
+        tokens = await google.exchange(client, redirect_uri, code, verifier)
+        await self.save_secret(app_id, tokens=tokens)
+        return tokens
+
     async def _connection(self, app: dict, row: Connection, interactive: bool, auth_url) -> dict:
         url = app["url"]
         conn: dict = {"transport": "sse" if url.rstrip("/").endswith("/sse") else "streamable_http", "url": url}
@@ -294,6 +365,7 @@ class Apps:
         flow: dict = {}
 
         async def redirect(url: str) -> None:
+            self._status(app_id, needs_signin=True)
             if not interactive:  # reconnecting at startup or a token that can't refresh: you have to sign in
                 raise NeedsSignIn()
             flow["state"] = parse_qs(urlparse(url).query).get("state", [""])[0]

@@ -33,6 +33,21 @@ def evidence(spans: list[dict], limit: int = 30_000) -> str:
     return "\n\n".join(parts)[:limit]
 
 
+def run_log(spans: list[dict]) -> str:
+    """What this run did, failures included: "the search timed out" is backed by this, not by a tool result.
+    Plumbing tools (connect_app...) are no evidence about the world, but what they returned is what the run did."""
+    return "\n".join(f"- {s['name']}: {s['status']}" + (f" ({s['error'][:150]})" if s.get("error") else "")
+                     + (f": {str(s['output'])[:300]}" if s["name"] in NOT_EVIDENCE and s.get("output") else "")
+                     for s in spans if s["kind"] == "tool") or "(no tools were used)"
+
+
+def grounding_input(question: str, proof: str, reply: str, *, now: str, spans: list[dict], apps: list[str]) -> str:
+    """What the checking model reads. Beyond the tool results it needs the clock, what the run did (a failure has no
+    result to quote) and which apps are connected, or it flags a correct time and an honest "that failed"."""
+    return (f"Now: {now}\nConnected apps: {', '.join(apps) or 'none'}\nTools used in this run:\n{run_log(spans)}\n\n"
+            f"User message:\n{question}\n\nEvidence:\n{proof}\n\nReply to check:\n{reply}")
+
+
 def parse_unsupported(text: str) -> list[str]:
     """Only `UNSUPPORTED:` lines count: some models think aloud first, and that prose must not become a flag."""
     return [m.strip() for m in UNSUPPORTED.findall(text) if m.strip()][:8]

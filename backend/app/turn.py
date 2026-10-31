@@ -12,7 +12,7 @@ from sqlalchemy import select, update
 
 from .agent.graph import AgentSpec, as_text
 from .agent.prompts import VERIFY
-from .checks import NOT_EVIDENCE, citation_check, drop_found, evidence, is_source, parse_unsupported
+from .checks import NOT_EVIDENCE, citation_check, drop_found, evidence, grounding_input, is_source, parse_unsupported
 from .db import Message, Run, Span, Thread, new_id, utcnow
 from .runtime import Runtime
 from .tracing import RUN, RunContext, clean, run_cost, scrub, span
@@ -81,8 +81,10 @@ async def check_grounding(rt: Runtime, ctx: RunContext, thread_id: str, question
         proof = evidence(await _sources(rt, ctx, thread_id)) or "(none: nothing was looked up)"
         async with span("llm", rt.model_names["fast"],
                         input={"purpose": "grounding check", "evidence_chars": len(proof)}) as sp:
+            now = datetime.now(ZoneInfo(rt.settings.timezone)).strftime("%A %d %B %Y, %H:%M %Z")
+            apps = [a for a, st in rt.apps.state.items() if st.get("state") == "connected"]
             msg = await asyncio.wait_for(rt.models["fast"].ainvoke([SystemMessage(VERIFY), HumanMessage(
-                f"User message:\n{question}\n\nEvidence:\n{proof}\n\nReply to check:\n{reply}")]),
+                grounding_input(question, proof, reply, now=now, spans=ctx.spans, apps=apps))]),
                 rt.settings.tool_timeout_s)
             usage = msg.usage_metadata or {}
             sp.update(tokens_in=usage.get("input_tokens", 0), tokens_out=usage.get("output_tokens", 0))

@@ -11,15 +11,16 @@ from alembic.script import ScriptDirectory
 from langchain.chat_models import init_chat_model
 from langchain.embeddings import init_embeddings
 from riki_memory import MemoryConfig, RikiMemory
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from .agent.graph import SUB_AGENT_BASE_TOOLS, Agent
 from .apps import CATALOG, Apps
 from .agent.mcp import load_mcp
 from .agent.policy import expire_stale
-from .agent.prompts import PROMPT_VERSION, main_prompt, persona_version, sub_prompt
+from .agent.prompts import PROMPT_VERSION, TEMPLATES, main_prompt, persona_version, sub_prompt
 from .agent.tools import ToolRegistry, builtin_tools
 from .config import BACKEND_DIR, Settings
-from .db import Database, Persona
+from .db import Database, Persona, PromptVersion, utcnow
 from .memory import LangChainProvider
 from .ops import heartbeat_loop, interrupt_stale_runs
 
@@ -40,6 +41,9 @@ def _model(spec: str, settings: Settings):
     if spec.startswith("openai"):
         kwargs["stream_usage"] = True  # off by default for custom base URLs; the token budget needs it
         kwargs["max_retries"] = 4  # proxies answer 502 now and then; the default of 2 gives up too soon
+        # a stalled stream is cut and retried (graph.ProviderHiccup) instead of eating 120s, the library default.
+        # shortcut: a model that thinks silently for over 45s without streaming would be cut too; raise it then
+        kwargs["stream_chunk_timeout"] = 45
     return init_chat_model(spec, **kwargs)
 
 
@@ -112,10 +116,18 @@ class Runtime:
                 persona = Persona(id=1)
                 db.add(persona)
                 await db.commit()
+            self.prompt_version = f"{PROMPT_VERSION}.{persona_version(persona.soul, persona.name)}"
+            # the text behind every version stays readable; apps connecting at once may race here, hence on-conflict
+            await db.execute(pg_insert(PromptVersion).values(
+                id=self.prompt_version, templates=TEMPLATES, persona={"name": persona.name, "soul": persona.soul},
+                created_at=utcnow()).on_conflict_do_nothing())
+            await db.commit()
         self.persona = persona
-        self.prompt_version = f"{PROMPT_VERSION}.{persona_version(persona.soul, persona.name)}"
+        # from the registry, not app state: an app reloads the prompt just before it reports "connected"
+        live = {e.source.split(":", 1)[1] for e in self.registry.entries.values() if e.source.startswith("app:")}
         self.main_system = main_prompt(s.user_name, self.registry.catalog(exclude=set(s.core_tools)),
-                                       persona.name, persona.soul, ", ".join(CATALOG))
+                                       persona.name, persona.soul, ", ".join(a for a in CATALOG if a not in live),
+                                       ", ".join(sorted(live)))
         self.sub_system = sub_prompt(s.user_name, self.registry.catalog(exclude={*SUB_AGENT_BASE_TOOLS, "connect_app"}),
                                      persona.name)
         return persona

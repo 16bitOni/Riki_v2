@@ -11,6 +11,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, TypedDict
 
+import openai
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.messages.utils import message_chunk_to_message
 from langchain_core.tools import BaseTool, tool
@@ -34,6 +35,10 @@ CLEARED = "cleared from context to save tokens"
 BUDGET_NOTE = "I stopped here: this request reached its token budget. Ask me to continue if it is worth more."
 REPEATED = "You already made this exact call"
 SUB_AGENT_BASE_TOOLS = ["current_time", "recall_memory", "load_tools"]
+
+
+class ProviderHiccup(Exception):
+    """The provider stalled or failed mid-stream before the user saw anything: the model step is retried."""
 
 
 class AgentState(TypedDict):
@@ -97,7 +102,8 @@ class Agent:
         # A flaky provider can answer 200 with an empty stream, which the client does not retry. Nothing has been
         # emitted to the user at that point, so retrying the step is safe. Other errors are not retried here.
         g.add_node("model", self._call_model, retry_policy=RetryPolicy(
-            max_attempts=3, retry_on=lambda e: isinstance(e, ValueError) and "No generation chunks" in str(e)))
+            max_attempts=3, retry_on=lambda e: isinstance(e, ProviderHiccup)
+            or isinstance(e, ValueError) and "No generation chunks" in str(e)))
         g.add_node("tools", self._call_tools)
         g.add_edge(START, "model")
         g.add_conditional_edges("model", lambda s: "tools" if s["messages"][-1].tool_calls else END)
@@ -203,11 +209,19 @@ class Agent:
         async with span("llm", self.rt.model_names[spec.tier],
                         input={"messages": len(messages), "tools": [t.name for t in tools],
                                "last": last.content if isinstance(last.content, str) else as_text(last.content)}) as sp:
-            acc = None
-            async for chunk in model.astream(messages, **self.rt.call_kwargs[spec.tier]):
-                acc = chunk if acc is None else acc + chunk
-                if spec.depth == 0 and chunk.text:
-                    ctx.emit("token", text=chunk.text)
+            acc, shown = None, False
+            try:
+                async for chunk in model.astream(messages, **self.rt.call_kwargs[spec.tier]):
+                    acc = chunk if acc is None else acc + chunk
+                    if spec.depth == 0 and chunk.text:
+                        ctx.emit("token", text=chunk.text)
+                        shown = True
+            except (TimeoutError, openai.APIError) as e:
+                # A stalled stream or a mid-stream provider error ("try your request again"). Status errors were
+                # already retried by the client. Retry the step only if the user has seen none of it yet.
+                if shown or isinstance(e, openai.APIStatusError):
+                    raise
+                raise ProviderHiccup(str(e)) from e
             msg = message_chunk_to_message(acc)
             usage = msg.usage_metadata or {}
             cached = (usage.get("input_token_details") or {}).get("cache_read", 0) or 0

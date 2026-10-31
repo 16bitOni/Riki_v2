@@ -436,6 +436,22 @@ async def test_empty_stream_from_the_provider_is_retried(make_runtime):
     assert output == "second try worked" and len(attempts) == 2
 
 
+async def test_stalled_or_failed_stream_is_retried_before_anything_is_shown(make_runtime):
+    import httpx
+    import openai
+
+    errors = [TimeoutError("no chunk"), openai.APIError("try again", httpx.Request("POST", "http://x"), body=None)]
+
+    def respond(messages):
+        if errors:
+            raise errors.pop(0)
+        return AIMessage("third try worked")
+
+    rt = await make_runtime(respond)
+    _, output = await run(rt, "tell me something")
+    assert output == "third try worked" and not errors
+
+
 def test_mcp_tool_schema_with_top_level_anyof_is_flattened():
     from langchain_core.tools import StructuredTool
     from langchain_core.utils.function_calling import convert_to_openai_tool
@@ -572,11 +588,62 @@ async def test_smart_sub_agents_use_the_smart_model_at_any_effort(make_runtime):
 
 
 async def test_running_out_of_tokens_still_ends_in_an_answer_when_something_was_found(make_runtime):
+    @tool
+    def probe(n: int) -> str:
+        """Finds something."""
+        return f"found {n}"
+
     def respond(messages):
         if "Token budget reached" in str(messages[-1].content):
             return AIMessage("here is what I found so far")
-        return AIMessage("", tool_calls=[tool_call("current_time", {}, len(messages))])
+        # distinct arguments each time, or the loop breaker steps in before the budget does
+        return AIMessage("", tool_calls=[tool_call("probe", {"n": len(messages)}, len(messages))])
 
-    rt = await make_runtime(respond, run_token_budget=1_000)
+    rt = await make_runtime(respond, extra_tools=[ToolEntry(probe, "safe")], core_tools=["probe"], run_token_budget=1_000)
     _, output = await run(rt, "research everything")
     assert output == "here is what I found so far"
+
+
+
+async def test_the_fact_checker_is_given_the_clock_and_what_the_run_did(make_runtime):
+    # Bug seen in real use: a correct "it's 6:21 pm" and an honest "the search timed out" were flagged "Not verified",
+    # because the checker saw only tool results, and a failed call has none.
+    seen = []
+
+    @tool
+    def flaky() -> str:
+        """Always fails."""
+        raise RuntimeError("down")
+
+    def verify(messages):
+        seen.append(messages[-1].content)
+        return AIMessage("NONE")
+
+    def respond(messages):
+        if isinstance(messages[-1], ToolMessage):
+            return AIMessage("The search timed out, so I have nothing.")
+        return AIMessage("", tool_calls=[tool_call("flaky", {}, len(messages))])
+
+    rt = await make_runtime(respond, verify=verify, extra_tools=[ToolEntry(flaky, "safe")], core_tools=["flaky"])
+    _, output = await run(rt, "look it up for me")
+    assert "Not verified" not in output
+    assert re.search(r"Now: \w+day \d\d \w+ 20\d\d, \d\d:\d\d", seen[0]) and "- flaky: error (RuntimeError: down)" in seen[0]
+
+
+async def test_prompt_text_is_kept_for_its_version_and_connected_apps_are_named(make_runtime):
+    from app.agent.prompts import TEMPLATES
+    from app.db import PromptVersion
+
+    @tool
+    async def gmail_search(query: str) -> str:
+        """Search mail."""
+        return "none"
+
+    rt = await make_runtime(lambda m: AIMessage("hi"), extra_tools=[ToolEntry(gmail_search, "safe", "app:gmail")])
+    async with rt.db.session() as s:
+        row = await s.get(PromptVersion, rt.prompt_version)
+    assert row.templates == TEMPLATES and row.persona["name"] == rt.persona.name
+    await rt.reload_persona()  # a second reload of the same version is not an error
+    connected, missing = re.search(r"Connected and ready to use[^:]*: (.*)\. Not connected yet: (.*)\.",
+                                   rt.main_system).groups()
+    assert connected == "gmail" and "gmail" not in missing.split(", ")

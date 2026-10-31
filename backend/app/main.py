@@ -727,7 +727,10 @@ async def connect_app(app_id: AppId, body: ConnectIn, request: Request, rt: Auth
         changes["token"] = body.token.strip()
     if app_def["auth"] == "google":
         if body.client_id and body.client_secret:
-            changes["client"] = {"client_id": body.client_id.strip(), "client_secret": body.client_secret.strip(),
+            if not body.client_id.strip().endswith(".apps.googleusercontent.com"):  # Google answers anything else "invalid_client"
+                raise HTTPException(400, "That is not a Google OAuth client ID. It looks like 123456-abc.apps.googleusercontent.com "
+                                         "(Google Cloud > Credentials > Create credentials > OAuth client ID).")
+            changes["client"] ={"client_id": body.client_id.strip(), "client_secret": body.client_secret.strip(),
                                  "redirect_uris": [redirect_uri], "token_endpoint_auth_method": "client_secret_post",
                                  "grant_types": ["authorization_code", "refresh_token"], "response_types": ["code"]}
         elif not secret.get("client"):

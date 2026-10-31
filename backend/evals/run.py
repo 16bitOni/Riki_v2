@@ -168,12 +168,17 @@ async def main(argv: list[str] | None = None) -> int:
                     print(f"     - {f}")
 
         async with rt.db.session() as s:
-            previous = await s.scalar(select(EvalRun).order_by(EvalRun.created_at.desc()).limit(1))
+            # baseline: the last run of the same model on the same cases; another model or a --case subset is no
+            # comparison. shortcut: scans the last 50 runs, enough for a local history
+            ids = sorted(r["id"] for r in results)
+            recent = (await s.scalars(select(EvalRun).where(EvalRun.model == rt.settings.model)
+                                      .order_by(EvalRun.created_at.desc()).limit(50))).all()
+            previous = next((e for e in recent if sorted(r["id"] for r in e.results) == ids), None)
             before = {r["id"]: r["passed"] for r in (previous.results if previous else [])}
             regressions = [r["id"] for r in results if before.get(r["id"]) and not r["passed"]]
             s.add(EvalRun(prompt_version=rt.prompt_version, model=rt.settings.model, repeat=args.repeat,
                           passed=sum(r["passed"] for r in results), total=len(results), results=results,
-                          regressions=regressions))
+                          regressions=regressions, judge=JUDGE))
             await s.commit()
     finally:
         await rt.stop()
@@ -182,7 +187,7 @@ async def main(argv: list[str] | None = None) -> int:
     print(f"\n{passed}/{len(results)} cases passed (pass^{args.repeat}), model {rt.settings.model}, "
           f"prompt {rt.prompt_version}")
     if regressions:
-        print(f"REGRESSIONS vs previous run: {', '.join(regressions)}")
+        print(f"REGRESSIONS vs {previous.prompt_version} ({previous.created_at:%d %b %H:%M}): {', '.join(regressions)}")
         return 1
     return 0
 

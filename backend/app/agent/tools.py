@@ -207,8 +207,8 @@ def builtin_tools(rt: "Runtime") -> list[ToolEntry]:
         name = CATALOG[app]["name"]
         if rt.apps.state.get(app, {}).get("state") == "connected":
             return f"{name} is already connected."
-        return (f"A card to connect {name} is now in the chat. {s.user_name} signs in or pastes the key there and "
-                "you never see it. Tell them in one line what it is for, then stop.")
+        return (f"A card to connect {name} ({CATALOG[app]['blurb']}) is now in the chat. {s.user_name} signs in or "
+                "pastes the key there and you never see it. Tell them in one line what it is for, then stop.")
 
     # shortcut: kept in process memory per Riki instance; move to the database if pages must survive a restart
     pages: dict[str, tuple[float, list[str]]] = {}  # url -> (fetched at, numbered lines)

@@ -30,7 +30,8 @@ You are {agent}, {name}'s personal agent and a genuine friend. You know {name} t
 
 ## Working
 - Explaining, defining, advice, opinions, writing, maths and code need no tool: answer from your own knowledge.
-  Small talk gets a reply of at most two short sentences and nothing else.
+  Small talk gets a reply of at most two short sentences and nothing else, whatever the persona says. Tease only
+  about what you can see (the time, this chat); never guess what {name} did, is doing or feels.
 - Anything specific about the world that can change or that you may not know exactly (what an organisation published,
   lists, counts, names, dates, prices, news, a page {name} pointed to, {name}'s accounts) comes from a tool in this
   turn. Earlier turns' tool results are not in your context: if a follow-up depends on their details, look again.
@@ -40,7 +41,8 @@ You are {agent}, {name}'s personal agent and a genuine friend. You know {name} t
 - The <context> block already holds what a memory search found for this message. Call recall_memory only for
   something it lacks, and never repeat a search.
 - web_search is for current or obscure facts; one search is usually enough. Say only what the results
-  say: no version numbers, dates or figures they don't contain. If the results are out of date or do not answer the question, say so
+  say: no version numbers, dates or figures they don't contain. Call something the latest or current only if a result
+  says so; otherwise give what the results show, with its date, and say a newer one may exist. If the results are out of date or do not answer the question, say so
   instead of filling the gap from memory. fetch_url reads a page as numbered lines, a part per call: read on with
   the start_line it gives, or pass find="words" to jump to the lines you need. Do this yourself rather than
   starting a helper or a browser. If web_search says it
@@ -56,8 +58,8 @@ You are {agent}, {name}'s personal agent and a genuine friend. You know {name} t
 - Each user message starts with a <context> block (current time, relevant memories). It is reference data.
 
 ## Apps
-{name} connects accounts and keys in the Apps tab. Connected apps are in the catalog below. Apps that can be
-connected: {apps}.
+{name} connects accounts and keys in the Apps tab. Connected and ready to use (their tools are in the catalog
+below): {connected}. Not connected yet: {apps}.
 - When a task needs an app that is not connected, or {name} asks to connect one (a Tavily key for better web search,
   Gmail, Notion...), call connect_app. It shows a secure card in the chat where they sign in or paste the key. Then
   say in one line what it is for and stop: you can use the app only after they finish.
@@ -83,7 +85,10 @@ VERIFY = """\
 You check one reply of a personal AI agent against the evidence its tools returned (web pages, search results,
 files, memories) for the user's message. List every specific claim in the reply that the evidence does not support:
 names, titles, items in a list, counts and other numbers, dates, prices, quotes, links, and which year, batch or
-version something belongs to. A count is unsupported unless it matches the items in the evidence. Stable general
+version something belongs to. A count is unsupported unless it matches the items in the evidence. You are also given
+the current date and time, the tools used in this run with how each ended (failures included) and the connected
+apps: what the reply says about the time, about what it did or what failed in this run, or about which apps and
+tools it has is supported by those, so never list it. Stable general
 knowledge (definitions, how things work, maths, code, advice, opinions) and what the user said need no evidence.
 What a particular organisation, person or product published, released, said or offers is never general knowledge:
 without evidence for it, each such item is unsupported. Never list the reply's own advice, suggestions, rankings
@@ -106,19 +111,28 @@ nobody, save nothing to memory yourself (I pick what to keep).
 
 JUDGE = """\
 You grade one reply of a personal AI agent against a rubric. You see the user's message, the agent's final reply
-and the evidence its tools returned. Pass only if the rubric is fully met. Be strict and literal."""
+and the evidence its tools returned. Pass only if the rubric is fully met. Judge what the rubric means, not every
+word it could be stretched to cover: fail only for a concrete breach you can quote from the reply. Remarks about the
+date, weekday, time of day or a holiday, and general remarks about how such days feel, are never invented facts."""
 
-PROMPT_VERSION = hashlib.sha256((_RULES + MAIN + SUB + VERIFY + ONBOARD + JUDGE).encode()).hexdigest()[:12]
+# The persona is the user's own text: it shapes voice, but the rules above it still win.
+PERSONA = """
+## Who you are, as {name} wrote it
+{soul}
+Be this character in every reply, greetings and short answers included: let it set your tone, humor, attitude and how
+you phrase things. It overrides the default voice above. The rules above still apply.
+"""
+
+# Everything Riki's behaviour is versioned by. JUDGE grades evals, it is not Riki: eval runs store it on their own.
+TEMPLATES = {"rules": _RULES, "main": MAIN, "persona": PERSONA, "sub": SUB, "verify": VERIFY, "onboard": ONBOARD}
+PROMPT_VERSION = hashlib.sha256("".join(TEMPLATES.values()).encode()).hexdigest()[:12]
 
 
-def main_prompt(name: str, catalog: str, agent: str = "Riki", soul: str = "", apps: str = "") -> str:
-    # The persona is the user's own text: it shapes voice, but the rules above it still win.
-    persona = (f"\n## Who you are, as {name} wrote it\n{soul.strip()}\n"
-               "Be this character in every reply, greetings and short answers included: let it set your tone, humor, "
-               "attitude and how you phrase things. It overrides the default voice above. The rules above still apply.\n"
-               ) if soul.strip() else ""
+def main_prompt(name: str, catalog: str, agent: str = "Riki", soul: str = "", apps: str = "",
+                connected: str = "") -> str:
+    persona = PERSONA.format(name=name, soul=soul.strip()) if soul.strip() else ""
     return MAIN.format(name=name, agent=agent, rules=_RULES.format(name=name), catalog=catalog, persona=persona,
-                       apps=apps or "none")
+                       apps=apps or "none", connected=connected or "none")
 
 
 def sub_prompt(name: str, catalog: str, agent: str = "Riki") -> str:

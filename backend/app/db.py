@@ -130,7 +130,18 @@ class EvalRun(Base):
     total: Mapped[int] = mapped_column(Integer)
     results: Mapped[list] = mapped_column(JSONB)
     regressions: Mapped[list] = mapped_column(JSONB, default=list)
+    judge: Mapped[str | None] = mapped_column(Text)  # the grading prompt: not part of Riki's prompt_version
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
+class PromptVersion(Base):
+    """The prompt text behind a run's prompt_version (PROMPT_VERSION.persona_version), so an old one can be read back."""
+
+    __tablename__ = "prompt_versions"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    templates: Mapped[dict] = mapped_column(JSONB)
+    persona: Mapped[dict] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class Persona(Base):

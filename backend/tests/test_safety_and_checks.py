@@ -109,3 +109,11 @@ def test_grounding_flags_only_tagged_lines_and_not_items_found_in_the_evidence()
     proof = "Winter 2027 ... The $15-an-Hour Expert By Brad Flora ... Own Your Intelligence By Jon Xu"
     assert drop_found(claims, proof) == ["17 requests in total", "AI for Energy – Diana Hu"]
     assert parse_unsupported("NONE") == []
+
+
+def test_run_log_shows_what_plumbing_tools_returned_but_not_source_output():
+    from app.checks import run_log
+
+    log = run_log([{"kind": "tool", "name": "connect_app", "status": "ok", "output": "A card to connect Tavily is now in the chat."},
+                   {"kind": "tool", "name": "web_search", "status": "ok", "output": "page text"}])
+    assert "connect_app: ok: A card to connect Tavily is now in the chat." in log and "page text" not in log
