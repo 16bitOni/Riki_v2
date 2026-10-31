@@ -31,6 +31,7 @@ if TYPE_CHECKING:
 AGENT_DEPTH: ContextVar[int] = ContextVar("riki_depth", default=0)
 NOT_LOADED = "is not available to you"
 CLEARED = "cleared from context to save tokens"
+BUDGET_NOTE = "I stopped here: this request reached its token budget. Ask me to continue if it is worth more."
 REPEATED = "You already made this exact call"
 SUB_AGENT_BASE_TOOLS = ["current_time", "recall_memory", "load_tools"]
 
@@ -177,17 +178,22 @@ class Agent:
     async def _call_model(self, state: AgentState, config) -> dict:
         spec: AgentSpec = config["configurable"]["spec"]
         ctx, s = RUN.get(), self.limits()
-        if ctx.tokens_in + ctx.tokens_out >= s.run_token_budget:
-            return {"messages": [AIMessage("I stopped here: this request reached its token budget. "
-                                           "Ask me to continue if it is worth more.")]}
+        over = ctx.tokens_in + ctx.tokens_out >= s.run_token_budget
+        # Out of tokens with something gathered: one last call with no tools turns it into an answer instead of an
+        # apology (a request that spent its budget researching used to end with nothing at all).
+        # shortcut: that call may overshoot the budget by one answer; every agent of the run gets one.
+        landed = any(m.additional_kwargs.get("landed") for m in state["messages"] if isinstance(m, AIMessage))
+        if over and (landed or not any(isinstance(m, ToolMessage) for m in state["messages"])):
+            return {"messages": [AIMessage(BUDGET_NOTE)]}
         tools: list[BaseTool] = [self.rt.registry.get(n).tool for n in state["tools"] if self.offerable(n, spec.depth)]
         messages = [SystemMessage(spec.system), *compact(state["messages"], 4 * s.tool_output_chars)]
         rounds = sum(1 for m in state["messages"] if isinstance(m, AIMessage) and m.tool_calls)
         # a model that ignores the loop breaker twice would burn every remaining step on refused calls
         looping = sum(1 for m in state["messages"] if isinstance(m, ToolMessage) and REPEATED in m.content) >= 2
-        if looping or rounds >= s.max_steps_per_agent - 1:  # last step: no tools, the work so far becomes an answer
+        if looping or over or rounds >= s.max_steps_per_agent - 1:  # last step: no tools, the work so far becomes an answer
             tools = []
-            messages.append(HumanMessage(("You keep repeating refused calls" if looping else "Step limit reached")
+            messages.append(HumanMessage(("You keep repeating refused calls" if looping else
+                                          "Token budget reached" if over else "Step limit reached")
                                          + ": no more tools. Answer now with what you found so far "
                                          "and say plainly what is still missing."))
         model = self.rt.models[spec.tier]
@@ -211,6 +217,9 @@ class Agent:
             ctx.tokens_in += sp["tokens_in"]
             ctx.tokens_out += sp["tokens_out"]
             ctx.tokens_cached += cached
+        if over:  # a model that still asks for tools, or says nothing, ends on the plain notice
+            msg = AIMessage(BUDGET_NOTE) if msg.tool_calls or not msg.text.strip() else msg
+            msg.additional_kwargs["landed"] = True
         return {"messages": [msg]}
 
     async def _call_tools(self, state: AgentState, config) -> dict:

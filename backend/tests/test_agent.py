@@ -569,3 +569,14 @@ async def test_smart_sub_agents_use_the_smart_model_at_any_effort(make_runtime):
     rt = await make_runtime(respond)
     ctx, _ = await run(rt, "hard one", effort="medium")
     assert next(s for s in ctx.spans if s["kind"] == "agent" and s["parent_id"])["meta"]["tier"] == "smart"
+
+
+async def test_running_out_of_tokens_still_ends_in_an_answer_when_something_was_found(make_runtime):
+    def respond(messages):
+        if "Token budget reached" in str(messages[-1].content):
+            return AIMessage("here is what I found so far")
+        return AIMessage("", tool_calls=[tool_call("current_time", {}, len(messages))])
+
+    rt = await make_runtime(respond, run_token_budget=1_000)
+    _, output = await run(rt, "research everything")
+    assert output == "here is what I found so far"

@@ -90,11 +90,18 @@ async def judge(rt: Runtime, rubric: str, message: str, output: str, spans: list
         f"Rubric: {rubric}\n\nUser message:\n{message}\n\nAgent reply:\n{output}\n\nTool evidence:\n{evidence}\n\n"
         f"Context the agent is always given (you cannot see the rest of it): the current date and time, {now}, and "
         "the user's stored memories. Using the date, time or weekday is not inventing a fact.")]
-    try:  # the stronger model grades; a fast model grading itself is noisy (same reply, three different verdicts)
-        return await rt.models["smart"].with_structured_output(Verdict).ainvoke(prompt)
-    except Exception as exc:  # e.g. the smart model cannot do structured output on this gateway
-        print(f"  (smart judge failed: {type(exc).__name__}; using the fast model)", file=sys.stderr)
-        return await rt.models["fast"].with_structured_output(Verdict).ainvoke(prompt)
+    # The stronger model grades (a fast model grading itself is noisy), at temperature 0 so one reply gets one verdict.
+    # Each step down is for a gateway that refuses temperature or structured output on that model.
+    attempts = [lambda: rt.models["smart"].with_structured_output(Verdict, temperature=0),
+                lambda: rt.models["smart"].with_structured_output(Verdict),
+                lambda: rt.models["fast"].with_structured_output(Verdict)]
+    for i, make in enumerate(attempts):
+        try:
+            return await make().ainvoke(prompt)
+        except Exception as exc:
+            print(f"  (judge attempt {i + 1} failed: {type(exc).__name__})", file=sys.stderr)
+            if i == len(attempts) - 1:
+                raise
 
 
 async def attempt(rt: Runtime, case: dict) -> dict:
@@ -172,7 +179,8 @@ async def main(argv: list[str] | None = None) -> int:
         await rt.stop()
 
     passed = sum(r["passed"] for r in results)
-    print(f"\n{passed}/{len(results)} cases passed (pass^{args.repeat}), prompt {rt.prompt_version}")
+    print(f"\n{passed}/{len(results)} cases passed (pass^{args.repeat}), model {rt.settings.model}, "
+          f"prompt {rt.prompt_version}")
     if regressions:
         print(f"REGRESSIONS vs previous run: {', '.join(regressions)}")
         return 1
