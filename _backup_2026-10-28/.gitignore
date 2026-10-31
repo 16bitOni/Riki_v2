@@ -1,9 +1,0 @@
-.env
-.venv/
-__pycache__/
-*.pyc
-node_modules/
-frontend/dist/
-.pytest_cache/
-evals/results/
-backend/.playwright-mcp/
