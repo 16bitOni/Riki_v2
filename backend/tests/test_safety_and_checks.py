@@ -41,7 +41,9 @@ def test_citation_check():
     spans = [_span("memory", "recall", output="... (id: abcdef0123...)"), _span("tool", "web_search", ref="t1"),
              _span("tool", "fetch_url", status="error", ref="t2")]
     assert citation_check("a [t1] b [m:abcdef01]", spans) == {"citations": 2, "invalid_citations": []}
-    assert citation_check("a [t2] [t3] [m:99999999]", spans)["invalid_citations"] == ["t2", "t3", "m:99999999"]
+    # t2 failed but was issued: not a hallucination, just noted. t3 and the memory id never existed.
+    assert citation_check("a [t2] [t3] [m:99999999]", spans) == {
+        "citations": 3, "invalid_citations": ["t3", "m:99999999"], "failed_citations": ["t2"]}
 
 
 def test_check_case():

@@ -72,6 +72,11 @@ def citation_check(reply: str, spans: list[dict]) -> dict:
                     if s["kind"] == "memory" or s["name"] in ("recall_memory", "remember"))
     cited_tools = set(TOOL_REF.findall(reply))
     cited_memories = set(MEMORY_REF.findall(reply))
-    invalid = sorted(r for r in cited_tools if r not in tool_refs)
+    # A call that failed or was refused still happened: "the search timed out [t5]" is honest, so only a ref that
+    # was never issued is a hallucination. Citing a failed call as the source of a fact is for the grounding check.
+    issued = {s["ref"] for s in spans if s.get("ref")}
+    invalid = sorted(r for r in cited_tools if r not in issued)
+    failed = sorted(r for r in cited_tools if r in issued and r not in tool_refs)
     invalid += sorted(f"m:{m}" for m in cited_memories if m not in seen)
-    return {"citations": len(cited_tools) + len(cited_memories), "invalid_citations": invalid}
+    return {"citations": len(cited_tools) + len(cited_memories), "invalid_citations": invalid,
+            **({"failed_citations": failed} if failed else {})}

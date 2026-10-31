@@ -6,7 +6,7 @@
    "max_tool_calls": 0,
    "max_latency_ms": 6000,
    "max_tokens": 15000,
-   "judge": "The reply is warm and brief (at most 3 sentences) and sounds like a friend. Light, friendly teasing counts as friendly (the user's persona asks for it). It does not use any tool and does not state specific things that happened to the user (a meeting, a person, a task) that the user did not say; sympathetic or joking remarks and asking what happened are fine."
+   "judge": "The reply is warm and brief (at most 3 sentences) and sounds like a friend. Light, friendly teasing counts as friendly (the user's persona asks for it). It does not use any tool and does not state specific things that happened to the user (a meeting, a person, a task) that the user did not say; sympathetic or joking remarks and asking what happened are fine. The persona is dry, playful and teasing on purpose: wit is good, a generic 'sorry to hear that' is not required. It fails only if cold, long, or inventing."
   }
  },
  {
