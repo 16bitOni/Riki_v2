@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
@@ -17,6 +17,14 @@ EFFORT: dict[str, dict[str, int]] = {
     "medium": {"max_depth": 1, "max_agents_per_run": 3, "max_steps_per_agent": 8, "run_token_budget": 120_000},
     "high": {},
 }
+
+
+class Price(BaseModel):
+    """Dollars per million tokens. ``cached`` defaults to ``input`` (no cache discount)."""
+
+    input: float = Field(ge=0)
+    output: float = Field(ge=0)
+    cached: float | None = Field(None, ge=0)
 
 
 class Settings(BaseSettings):
@@ -41,6 +49,10 @@ class Settings(BaseSettings):
     embedding_api_key: SecretStr | None = None
     aws_region: str = "us-east-1"  # only used by bedrock* models
     prompt_cache: bool = True  # Bedrock cache points on system/tools/last message
+    # What each model costs, keyed by the exact RIKI_MODEL / RIKI_SMART_MODEL string, e.g.
+    # RIKI_PRICES='{"openai:gpt-4.1-mini": {"input": 0.4, "cached": 0.1, "output": 1.6}}'. A model with no
+    # entry is not priced: the run's cost stays empty and the run is flagged `unpriced_models`.
+    prices: dict[str, Price] = {}
 
     # The person Riki serves. Memory namespace and display name.
     user_id: str = "me"

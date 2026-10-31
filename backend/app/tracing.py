@@ -32,6 +32,27 @@ _SECRET_PATTERNS = [
 _KV_SECRET = re.compile(r'(?i)("?(?:password|passwd|secret|api_key|apikey|token)"?\s*[:=]\s*"?)[^\s",}]{4,}')
 
 
+def run_cost(spans: list[dict], prices: dict) -> tuple[float | None, list[str]]:
+    """Dollars spent on a run's model calls, and the models that had no price (cost is None if none had one).
+    Cached tokens are billed at the cached rate and counted inside tokens_in.
+    shortcut: only spans are priced, so riki-mem's own extraction and planner calls are not; wrap its provider
+    in spans if the memory bill matters."""
+    total, priced, unpriced = 0.0, False, []
+    for sp in spans:
+        if sp["kind"] != "llm" or not (sp["tokens_in"] or sp["tokens_out"]):
+            continue
+        price = prices.get(sp["name"])
+        if price is None:
+            if sp["name"] not in unpriced:
+                unpriced.append(sp["name"])
+            continue
+        cached = min(sp["tokens_cached"], sp["tokens_in"])
+        rate = price.input if price.cached is None else price.cached
+        total += ((sp["tokens_in"] - cached) * price.input + cached * rate + sp["tokens_out"] * price.output) / 1e6
+        priced = True
+    return (round(total, 6) if priced else None), unpriced
+
+
 def clean(text: str) -> str:
     """Postgres text and JSONB cannot hold NUL; one in a web page would otherwise lose the whole run."""
     return text.replace("\x00", "")

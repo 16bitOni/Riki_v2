@@ -494,6 +494,7 @@ type Metric = {
   avg_latency_ms: number;
   p95_latency_ms: number;
   avg_tokens: number;
+  cost_usd: number;
   cache_ratio: number;
   error_rate: number;
   bad_citations: number;
@@ -735,6 +736,7 @@ export function Quality() {
                 </div>
                 <span className="muted small">
                   Average {seconds(m.avg_latency_ms)} · slowest 5% {seconds(m.p95_latency_ms)} · {m.avg_tokens.toLocaleString()} tokens ·{" "}
+                  {m.cost_usd > 0 ? `$${m.cost_usd.toFixed(3)} · ` : ""}
                   {Math.round(m.cache_ratio * 100)}% cached
                 </span>
                 {flags.some(([on]) => on) && (

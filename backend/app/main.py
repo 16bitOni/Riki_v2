@@ -868,6 +868,7 @@ async def metrics(rt: Auth, days: int = Query(30, ge=1, le=365)):
                avg(r.latency_ms)::int as avg_latency_ms,
                percentile_cont(0.95) within group (order by r.latency_ms)::int as p95_latency_ms,
                avg(r.tokens_in + r.tokens_out)::int as avg_tokens,
+               coalesce(sum(r.cost_usd), 0)::float as cost_usd,
                coalesce(sum(r.tokens_cached)::float / nullif(sum(r.tokens_in), 0), 0) as cache_ratio,
                avg((r.status = 'error')::int)::float as error_rate,
                count(*) filter (where jsonb_array_length(coalesce(r.checks->'invalid_citations', '[]')) > 0)
@@ -877,6 +878,21 @@ async def metrics(rt: Auth, days: int = Query(30, ge=1, le=365)):
         from runs r left join feedback f on f.run_id = r.id left join d on d.run_id = r.id
         where r.source = 'chat' and r.created_at > now() - make_interval(days => :days)
         group by 1 order by 1""")
+    async with rt.db.session() as s:
+        rows = (await s.execute(sql, {"days": days})).mappings().all()
+    return [dict(r) for r in rows]
+
+
+@app.get("/api/cost")
+async def cost(rt: Auth, days: int = Query(30, ge=1, le=365)):
+    """Spend per day and per kind of run (chat, eval, heartbeat, onboarding), so background work shows up."""
+    sql = text("""
+        select date_trunc('day', created_at)::date as day, source, count(*) as runs,
+               coalesce(sum(cost_usd), 0)::float as cost_usd,
+               coalesce(sum(tokens_in + tokens_out), 0)::int as tokens,
+               count(*) filter (where cost_usd is null) as unpriced_runs
+        from runs where created_at > now() - make_interval(days => :days)
+        group by 1, 2 order by 1, 2""")
     async with rt.db.session() as s:
         rows = (await s.execute(sql, {"days": days})).mappings().all()
     return [dict(r) for r in rows]

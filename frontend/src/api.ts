@@ -71,6 +71,7 @@ export type RunRow = {
   tokens_in: number;
   tokens_out: number;
   tokens_cached: number;
+  cost_usd: number | null;
   prompt_version: string;
   model: string;
   checks: { citations?: number; invalid_citations?: string[]; unsupported?: string[] };
@@ -140,6 +141,7 @@ export type RunEnd = {
   tokens_in: number;
   tokens_out: number;
   tokens_cached: number;
+  cost_usd: number | null;
   checks: { citations: number; invalid_citations: string[]; unsupported?: string[] };
 };
 

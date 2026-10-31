@@ -243,7 +243,7 @@ export function Chat(props: {
         d?.live
           ? { ...d, live: false, spans: l.spans, approvals: l.approvals,
               run: { ...d.run, id: e.run_id, status: e.status, error: e.error, latency_ms: e.latency_ms,
-                     tokens_in: e.tokens_in, tokens_out: e.tokens_out, tokens_cached: e.tokens_cached, checks: e.checks } }
+                     tokens_in: e.tokens_in, tokens_out: e.tokens_out, tokens_cached: e.tokens_cached, cost_usd: e.cost_usd, checks: e.checks } }
           : d,
       );
       return { spans: [], approvals: [], runId: null };

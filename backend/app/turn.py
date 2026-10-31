@@ -15,7 +15,7 @@ from .agent.prompts import VERIFY
 from .checks import NOT_EVIDENCE, citation_check, drop_found, evidence, is_source, parse_unsupported
 from .db import Message, Run, Span, Thread, new_id, utcnow
 from .runtime import Runtime
-from .tracing import RUN, RunContext, clean, scrub, span
+from .tracing import RUN, RunContext, clean, run_cost, scrub, span
 
 log = logging.getLogger(__name__)
 
@@ -107,14 +107,14 @@ def start_run(rt: Runtime, thread_id: str, text: str, *, source: str = "chat", l
 
 
 async def _save(rt: Runtime, ctx: RunContext, thread_id: str, output: str, status: str, error: str | None,
-                latency: int, checks: dict, spans: bool) -> None:
+                latency: int, checks: dict, cost: float | None, spans: bool) -> None:
     async with rt.db.session() as db:
         if spans:
             db.add_all([Span(**sp) for sp in ctx.spans])
         db.add(Message(thread_id=thread_id, role="assistant", content=output, run_id=ctx.run_id))
         await db.execute(update(Run).where(Run.id == ctx.run_id).values(
             status=status, output=output, error=error, latency_ms=latency, tokens_in=ctx.tokens_in,
-            tokens_out=ctx.tokens_out, tokens_cached=ctx.tokens_cached, checks=checks))
+            tokens_out=ctx.tokens_out, tokens_cached=ctx.tokens_cached, cost_usd=cost, checks=checks))
         await db.commit()
 
 
@@ -141,6 +141,7 @@ async def run_turn(rt: Runtime, ctx: RunContext, thread_id: str, text: str, *, l
     rt.active[ctx.run_id] = {"run_id": ctx.run_id, "thread_id": thread_id, "source": ctx.source,
                              "input": text[:200], "started_at": utcnow()}
 
+    cost = None
     output, status, error, known, unsupported = "", "ok", None, [], None
     try:
         memory_text, small = "", is_small_talk(text, rt.persona.name)
@@ -190,21 +191,24 @@ async def run_turn(rt: Runtime, ctx: RunContext, thread_id: str, text: str, *, l
         output = scrub(clean(output), "[secret removed]")
         latency = int((time.perf_counter() - started) * 1000)
         checks = citation_check(output, ctx.spans) | ({} if unsupported is None else {"unsupported": unsupported})
+        cost, unpriced = run_cost(ctx.spans, s.prices)
+        if unpriced:
+            checks = checks | {"unpriced_models": unpriced}
         if checks["invalid_citations"]:
             log.warning("run %s cites evidence that does not exist: %s", ctx.run_id, checks["invalid_citations"])
         try:
-            await _save(rt, ctx, thread_id, output, status, error, latency, checks, spans=True)
+            await _save(rt, ctx, thread_id, output, status, error, latency, checks, cost, spans=True)
         except Exception:
             log.exception("saving run %s failed; saving the answer without its trace", ctx.run_id)
             error = (error or "") + " (the step-by-step trace could not be saved)"
-            await _save(rt, ctx, thread_id, output, status, error.strip(), latency, checks, spans=False)
+            await _save(rt, ctx, thread_id, output, status, error.strip(), latency, checks, cost, spans=False)
     except Exception:
         log.exception("could not record run %s at all", ctx.run_id)
         latency, checks = int((time.perf_counter() - started) * 1000), {}
     finally:
         ctx.emit("run_end", run_id=ctx.run_id, status=status, output=output, error=error, latency_ms=latency,
                  tokens_in=ctx.tokens_in, tokens_out=ctx.tokens_out, tokens_cached=ctx.tokens_cached,
-                 checks=checks, finished_at=utcnow().isoformat())
+                 cost_usd=cost, checks=checks, finished_at=utcnow().isoformat())
     if learn and status == "ok":
         rt.spawn(rt.memory.remember(memory_user, text, output, known=known, turn_key=f"{thread_id}/{ctx.run_id}"))
     return output

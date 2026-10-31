@@ -98,6 +98,9 @@ Models are LangChain `provider:model` strings, so any provider LangChain support
 | `RIKI_SMART_MODEL` | `openai:gpt-4.1` | sub-agents spawned with `smart: true` |
 | `RIKI_EMBEDDING_MODEL` | `openai:text-embedding-3-small` | memory search |
 
+Each run's cost appears in its details and on the Health tab once you price your models in `RIKI_PRICES`
+(dollars per million tokens, see `.env.example`). A model without a price shows no cost rather than a guess.
+
 The fast model runs the main agent on purpose: most personal-agent turns are short, and latency is what
 you feel. Hard reasoning is delegated to a smart sub-agent. The defaults need `OPENAI_API_KEY`. To use Bedrock instead, set the three variables to
 `bedrock_converse:<model id>` / `bedrock:<embedding model id>` and see the AWS notes above.

@@ -187,6 +187,12 @@ export function RunDrawer(props: {
               {run.tokens_cached ? <small> {run.tokens_cached.toLocaleString()} cached</small> : null}
             </dd>
           </div>
+          {run.cost_usd != null && (
+            <div>
+              <dt>Cost</dt>
+              <dd>{run.cost_usd >= 1 ? `$${run.cost_usd.toFixed(2)}` : `$${run.cost_usd.toFixed(4)}`}</dd>
+            </div>
+          )}
           <div>
             <dt>Model calls</dt>
             <dd>{llm.length}</dd>
