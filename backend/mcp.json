@@ -1,0 +1,32 @@
+{
+  "_doc": "MCP servers Riki connects to at startup. Tool risk: names matching external_tools are never run (Riki never contacts other people); safe_tools run without asking (url_tools only for a URL the user, a search or a page already showed word for word); everything else needs your approval in the UI. Patterns are globs. ${VAR} values come from the environment / backend/.env. A server that fails to start is skipped with a warning. Tool names get the server name as prefix, e.g. filesystem_read_text_file.",
+  "servers": {
+    "filesystem": {
+      "enabled": true,
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "${RIKI_FILES_DIR}"],
+      "safe_tools": ["read_*", "list_*", "directory_tree", "search_files", "get_file_info"]
+    },
+    "browser": {
+      "enabled": true,
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@latest", "--headless", "--isolated"],
+      "safe_tools": ["browser_navigate", "browser_navigate_back", "browser_snapshot", "browser_take_screenshot",
+                     "browser_find", "browser_console_messages", "browser_network_request*", "browser_tabs",
+                     "browser_wait_for", "browser_close", "browser_resize"],
+      "url_tools": ["browser_navigate"],
+      "external_tools": ["browser_file_upload"]
+    },
+    "github": {
+      "enabled": false,
+      "transport": "streamable_http",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "headers": {"Authorization": "Bearer ${GITHUB_TOKEN}"},
+      "safe_tools": ["get_*", "list_*", "search_*"],
+      "external_tools": ["*comment*", "*review*", "create_issue", "update_issue", "*pull_request*", "*notification*",
+                         "assign_*", "request_*"]
+    }
+  }
+}

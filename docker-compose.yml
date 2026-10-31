@@ -1,0 +1,20 @@
+# Postgres 17 + pgvector for Riki. Port 5433 so it never clashes with a local Postgres.
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.0-pg17
+    environment:
+      POSTGRES_USER: riki
+      POSTGRES_PASSWORD: riki
+      POSTGRES_DB: riki
+    ports:
+      - "127.0.0.1:5435:5432"
+    volumes:
+      - riki-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U riki -d riki"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  riki-pgdata:

@@ -1,0 +1,396 @@
+- main [ref=f138e47]:
+  - generic [ref=f138e48]:
+    - heading "Requests for Startups" [level=1] [ref=f138e49]
+    - paragraph [ref=f138e50]: RFS is our tradition of sharing ideas we'd like to see founders tackle. These represent just a fraction of what we fund — if one excites you, take it as extra validation to dive in, but you don't need to work on these ideas to apply to YC.
+  - generic [ref=f138e52]:
+    - group "Select a batch" [ref=f138e54]:
+      - button "Winter 2027" [pressed] [ref=f138e55] [cursor=pointer]
+      - button "Fall 2026" [ref=f138e56] [cursor=pointer]
+      - button "Summer 2026" [ref=f138e57] [cursor=pointer]
+      - button "Spring 2026" [ref=f138e58] [cursor=pointer]
+      - button "Fall 2025" [ref=f138e59] [cursor=pointer]
+      - button "Summer 2025" [ref=f138e60] [cursor=pointer]
+      - button "Spring 2025" [ref=f138e61] [cursor=pointer]
+      - button "Winter 2025" [ref=f138e62] [cursor=pointer]
+      - button "Summer 2024" [ref=f138e63] [cursor=pointer]
+    - generic [ref=f138e65]:
+      - heading "Winter 2027" [level=2] [ref=f138e66]
+      - paragraph [ref=f138e67]: AI's biggest bottlenecks are moving beyond the models. We're excited about a new wave of startups building the hardware, infrastructure, financial systems, and specialized software needed to bring intelligence into the real economy, from factories and data centers to government and space.
+    - generic [ref=f138e68]:
+      - generic [ref=f138e71]:
+        - generic [ref=f138e72]:
+          - heading [level=3] [ref=f138e73]:
+            - text: Startups in a World of Abundant Space Access
+            - link "Copy link to Startups in a World of Abundant Space Access" [ref=f138e75] [cursor=pointer]:
+              - /url: "#startups-in-a-world-of-abundant-space-access"
+          - generic [ref=f138e79]:
+            - text: By
+            - link "Ankit Gupta" [ref=f138e80] [cursor=pointer]:
+              - /url: https://www.ycombinator.com/people/ankit-gupta
+        - generic [ref=f138e81]:
+          - iframe [ref=f138e85]:
+            - generic [ref=f139e1]:
+              - generic "YouTube Video Player" [ref=f139e3]
+              - generic [ref=f139e5]:
+                - generic:
+                  - generic:
+                    - generic [ref=f139e6] [cursor=pointer]
+                    - button "Play video" [ref=f139e10] [cursor=pointer]
+                    - button "Hide player controls" [ref=f139e14] [cursor=pointer]
+                    - generic [ref=f139e16]:
+                      - generic [ref=f139e23]:
+                        - generic [ref=f139e24]:
+                          - link "Startups in a World of Abundant Space Access" [ref=f139e25] [cursor=pointer]:
+                            - /url: https://www.youtube.com/shorts/e5W-7cggAg0
+                          - link "Y Combinator" [ref=f139e26] [cursor=pointer]:
+                            - /url: /channel/UCcefcZRL2oaA_uBNeo5UOWg
+                        - generic [ref=f139e28]:
+                          - button [ref=f139e29] [cursor=pointer]
+                          - generic [ref=f139e31]:
+                            - generic: Y Combinator
+                            - generic: 2.42M subscribers
+                      - button "Share" [ref=f139e35] [cursor=pointer]
+          - generic [ref=f138e87]:
+            - text: SpaceX is projecting a near future in which there will be 10,000 Starship launches per year. Already, an expendable Starship is almost as cheap as a
+            - strong [ref=f138e88]: reusable
+            - text: Falcon 9 and much lower cost per kilogram. As Starship scales and becomes reusable, we are going to see several orders of magnitude reduction in launch costs per kg. This means it's now time to think about startups for a world of abundant space access. What business models maybe don't quite work today but could work when launch costs fall 100x or more, and the orbital economy takes off? We think those companies should be started now, and if you're a builder with an idea for one, we'd love to see you apply.
+      - generic [ref=f138e91]:
+        - generic [ref=f138e92]:
+          - heading [level=3] [ref=f138e93]:
+            - text: The $15-an-Hour Expert
+            - link "Copy link to The $15-an-Hour Expert" [ref=f138e95] [cursor=pointer]:
+              - /url: "#the-15-an-hour-expert"
+          - generic [ref=f138e99]:
+            - text: By
+            - link "Brad Flora" [ref=f138e100] [cursor=pointer]:
+              - /url: https://www.ycombinator.com/people/brad-flora
+        - generic [ref=f138e101]:
+          - iframe [ref=f138e105]:
+            - generic [ref=f140e1]:
+              - generic "YouTube Video Player" [ref=f140e3]
+              - generic [ref=f140e5]:
+                - generic:
+                  - generic:
+                    - generic [ref=f140e6] [cursor=pointer]
+                    - button "Play video" [ref=f140e10] [cursor=pointer]
+                    - button "Hide player controls" [ref=f140e14] [cursor=pointer]
+                    - generic [ref=f140e16]:
+                      - generic [ref=f140e23]:
+                        - generic [ref=f140e24]:
+                          - link "The $15-an-Hour Expert" [ref=f140e25] [cursor=pointer]:
+                            - /url: https://www.youtube.com/shorts/vaKVoWc3TtY
+                          - link "Y Combinator" [ref=f140e26] [cursor=pointer]:
+                            - /url: /channel/UCcefcZRL2oaA_uBNeo5UOWg
+                        - generic [ref=f140e28]:
+                          - button [ref=f140e29] [cursor=pointer]
+                          - generic [ref=f140e31]:
+                            - generic: Y Combinator
+                            - generic: 2.42M subscribers
+                      - button "Share" [ref=f140e35] [cursor=pointer]
+          - generic [ref=f138e106]: "Most people talk about AI replacing workers. We're excited about the opposite: AI that turns an ordinary worker into an expert. We're seeing companies hire smart people without credentials, back them with AI, and have them do work that used to need specialists. Imagine a really good customer service rep who's also really good at using AI suddenly able to consult on complicated mergers and acquisitions, supply chain optimization, or global trade. There are millions of jobs like this in benefits, taxes, insurance claims, medical billing, and immigration paperwork. Anywhere a credential is the bottleneck, this model works. The last industrial revolution built a middle class out of factory jobs. This one could build it out of expert jobs. We want to fund the companies that do it."
+      - generic [ref=f138e110]:
+        - generic [ref=f138e111]:
+          - heading [level=3] [ref=f138e112]:
+            - text: Robots Made in America
+            - link "Copy link to Robots Made in America" [ref=f138e114] [cursor=pointer]:
+              - /url: "#robots-made-in-america"
+          - generic [ref=f138e118]:
+            - text: By
+            - link "Diana Hu" [ref=f138e119] [cursor=pointer]:
+              - /url: https://www.ycombinator.com/people/diana-hu
+        - generic [ref=f138e120]:
+          - iframe [ref=f138e124]:
+            - generic [ref=f141e1]:
+              - generic "YouTube Video Player" [ref=f141e3]
+              - generic [ref=f141e5]:
+                - generic:
+                  - generic:
+                    - generic [ref=f141e6] [cursor=pointer]
+                    - button "Play video" [ref=f141e10] [cursor=pointer]
+                    - button "Hide player controls" [ref=f141e14] [cursor=pointer]
+                    - generic [ref=f141e16]:
+                      - generic [ref=f141e23]:
+                        - generic [ref=f141e24]:
+                          - link "Robots Made In America" [ref=f141e25] [cursor=pointer]:
+                            - /url: https://www.youtube.com/shorts/7adYEc1XkEs
+                          - link "Y Combinator" [ref=f141e26] [cursor=pointer]:
+                            - /url: /channel/UCcefcZRL2oaA_uBNeo5UOWg
+                        - generic [ref=f141e28]:
+                          - button [ref=f141e29] [cursor=pointer]
+                          - generic [ref=f141e31]:
+                            - generic: Y Combinator
+                            - generic: 2.42M subscribers
+                      - button "Share" [ref=f141e35] [cursor=pointer]
+          - generic [ref=f138e125]: "The best robot foundation models are starting to transfer skills from one robot to another, and I think the bottleneck is moving to the hardware. The U.S. installed 38,400 industrial robots in 2025, up 12 percent, but most robots here are still imported from Japan and Europe. Even the ones assembled here can depend on Chinese magnets. China made 94 percent of the world's sintered rare-earth magnets in 2024, and when it restricted exports in April 2025, some automakers had to cut production. In July, the FCC stopped authorizing new models of connected mobile robots unless they're made here or get an exemption. To count, more than 65 percent of a robot's component cost has to be domestic, rising to 75 percent in 2029. Assembling imported parts won't get you there. We want to fund founders building robots and their supply chain here: rare-earth magnets, motors, strain-wave gears, encoders, force sensors, grippers, chips, battery packs, and the machines that make them. If you're building this, we'd love to talk."
+      - generic [ref=f138e129]:
+        - generic [ref=f138e130]:
+          - heading [level=3] [ref=f138e131]:
+            - text: LLMs That Write Well
+            - link "Copy link to LLMs That Write Well" [ref=f138e133] [cursor=pointer]:
+              - /url: "#llms-that-write-well"
+          - generic [ref=f138e137]:
+            - text: By
+            - link "Jared Friedman" [ref=f138e138] [cursor=pointer]:
+              - /url: https://www.ycombinator.com/people/jared-friedman
+        - generic [ref=f138e139]:
+          - iframe [ref=f138e143]:
+            - generic [ref=f142e1]:
+              - generic "YouTube Video Player" [ref=f142e3]
+              - generic [ref=f142e5]:
+                - generic:
+                  - generic:
+                    - generic [ref=f142e6] [cursor=pointer]
+                    - button "Play video" [ref=f142e10] [cursor=pointer]
+                    - button "Hide player controls" [ref=f142e14] [cursor=pointer]
+                    - generic [ref=f142e16]:
+                      - generic [ref=f142e23]:
+                        - generic [ref=f142e24]:
+                          - link "LLMs That Write Well" [ref=f142e25] [cursor=pointer]:
+                            - /url: https://www.youtube.com/shorts/674Efd5Scfg
+                          - link "Y Combinator" [ref=f142e26] [cursor=pointer]:
+                            - /url: /channel/UCcefcZRL2oaA_uBNeo5UOWg
+                        - generic [ref=f142e28]:
+                          - button [ref=f142e29] [cursor=pointer]
+                          - generic [ref=f142e31]:
+                            - generic: Y Combinator
+                            - generic: 2.42M subscribers
+                      - button "Share" [ref=f142e35] [cursor=pointer]
+          - generic [ref=f138e144]: "As LLMs have gotten better at coding and math, they've actually gotten worse at writing. You're not just imagining it: the current models really do sound more robotic than the models from 2024 and 2025. This appears to be not just a temporary glitch, but a structural issue. The same reward signals that make models good at code actively flatten voice and style. If forced to choose, the major labs will always choose to focus on coding and agentic workflows over style. This has left an opportunity open for a startup that cares about producing a model that people like talking to. So if this is something you'd like to work on, we'd love to hear from you."
+      - generic [ref=f138e148]:
+        - generic [ref=f138e149]:
+          - heading [level=3] [ref=f138e150]:
+            - text: Plaid for Government Benefits
+            - link "Copy link to Plaid for Government Benefits" [ref=f138e152] [cursor=pointer]:
+              - /url: "#plaid-for-government-benefits"
+          - generic [ref=f138e156]:
+            - text: By
+            - link "Gustaf Alströmer" [ref=f138e157] [cursor=pointer]:
+              - /url: https://www.ycombinator.com/people/gustaf-alstromer
+        - generic [ref=f138e158]:
+          - iframe [ref=f138e162]:
+            - generic [ref=f143e1]:
+              - generic "YouTube Video Player" [ref=f143e3]
+              - generic [ref=f143e5]:
+                - generic:
+                  - generic:
+                    - generic [ref=f143e6] [cursor=pointer]
+                    - button "Play video" [ref=f143e10] [cursor=pointer]
+                    - button "Hide player controls" [ref=f143e14] [cursor=pointer]
+                    - generic [ref=f143e16]:
+                      - generic [ref=f143e23]:
+                        - generic [ref=f143e24]:
+                          - link "Plaid for Government Benefits" [ref=f143e25] [cursor=pointer]:
+                            - /url: https://www.youtube.com/shorts/3CDvfm9DYjw
+                          - link "Y Combinator" [ref=f143e26] [cursor=pointer]:
+                            - /url: /channel/UCcefcZRL2oaA_uBNeo5UOWg
+                        - generic [ref=f143e28]:
+                          - button [ref=f143e29] [cursor=pointer]
+                          - generic [ref=f143e31]:
+                            - generic: Y Combinator
+                            - generic: 2.42M subscribers
+                      - button "Share" [ref=f143e35] [cursor=pointer]
+          - generic [ref=f138e163]: If you've ever applied for government benefits, you know how it works. Prove your income. Prove who lives with you. Prove where you live. Then do it all again for the next program, and again at renewal. Every agency has its own portal, and none of them share data. People get rejected over a missing document. Government workers check pay stubs by hand. The same system that keeps honest people out also lets fraud in. The Government Accountability Office estimates fraud costs the federal government up to half a trillion dollars a year. Now AI can forge a pay stub in seconds. Before Plaid, every fintech app built its own bank connections. After Plaid, all it took was one tap. The government needs the same layer. With your consent, it pulls verified income, tax, and residency records straight from the source, into every program at once. Verify once, apply everywhere. The right people get approved faster, and fraudsters have nothing to fake. Starting in 2027, states must re-check millions of Medicaid enrollees every six months. And soon AI agents will handle enrollment, but only if they can trust the data. Whoever builds these pipes will own the infrastructure for our safety nets. If you're building this, we'd love to hear from you.
+      - generic [ref=f138e167]:
+        - generic [ref=f138e168]:
+          - heading [level=3] [ref=f138e169]:
+            - text: Wall Street for the Physical Buildout
+            - link "Copy link to Wall Street for the Physical Buildout" [ref=f138e171] [cursor=pointer]:
+              - /url: "#wall-street-for-the-physical-buildout"
+          - generic [ref=f138e175]:
+            - text: By
+            - link "Brad Flora" [ref=f138e176] [cursor=pointer]:
+              - /url: https://www.ycombinator.com/people/brad-flora
+        - generic [ref=f138e177]:
+          - iframe [ref=f138e181]:
+            - generic [ref=f144e1]:
+              - generic "YouTube Video Player" [ref=f144e3]
+              - generic [ref=f144e5]:
+                - generic:
+                  - generic:
+                    - generic [ref=f144e6] [cursor=pointer]
+                    - button "Play video" [ref=f144e10] [cursor=pointer]
+                    - button "Hide player controls" [ref=f144e14] [cursor=pointer]
+                    - generic [ref=f144e16]:
+                      - generic [ref=f144e23]:
+                        - generic [ref=f144e24]:
+                          - link "Wall Street for the Physical Buildout" [ref=f144e25] [cursor=pointer]:
+                            - /url: https://www.youtube.com/shorts/KlHzPbZ6PNI
+                          - link "Y Combinator" [ref=f144e26] [cursor=pointer]:
+                            - /url: /channel/UCcefcZRL2oaA_uBNeo5UOWg
+                        - generic [ref=f144e28]:
+                          - button [ref=f144e29] [cursor=pointer]
+                          - generic [ref=f144e31]:
+                            - generic: Y Combinator
+                            - generic: 2.42M subscribers
+                      - button "Share" [ref=f144e35] [cursor=pointer]
+          - generic [ref=f138e182]: Software is cheap to start. Robots, GPU clusters, and data centers aren't. Somebody has to pay for all that steel and silicon up front, and the financing mostly doesn't exist yet. Today, banks underwrite a robot like a forklift. Founders we work with are inventing the instruments themselves, like a lender for robots that each earn $500k/year and put options on GPU capacity. Every great buildout, from railroads to electricity to telecom, created giant financial companies alongside it. We want founders building lenders, leasing companies, securitization, and hedges for the physical AI economy. If you understand both the machines and the money, we'd love to talk.
+      - generic [ref=f138e186]:
+        - generic [ref=f138e187]:
+          - heading [level=3] [ref=f138e188]:
+            - text: Vertical Foundation Models
+            - link "Copy link to Vertical Foundation Models" [ref=f138e190] [cursor=pointer]:
+              - /url: "#vertical-foundation-models"
+          - generic [ref=f138e194]:
+            - text: By
+            - link "Diana Hu" [ref=f138e195] [cursor=pointer]:
+              - /url: https://www.ycombinator.com/people/diana-hu
+        - generic [ref=f138e196]:
+          - iframe [ref=f138e200]:
+            - generic [ref=f145e1]:
+              - generic "YouTube Video Player" [ref=f145e3]
+              - generic [ref=f145e5]:
+                - generic:
+                  - generic:
+                    - generic [ref=f145e6] [cursor=pointer]
+                    - button "Play video" [ref=f145e10] [cursor=pointer]
+                    - button "Hide player controls" [ref=f145e14] [cursor=pointer]
+                    - generic [ref=f145e16]:
+                      - generic [ref=f145e23]:
+                        - generic [ref=f145e24]:
+                          - link "Vertical Foundation Models" [ref=f145e25] [cursor=pointer]:
+                            - /url: https://www.youtube.com/shorts/LI9NqE2iIqg
+                          - link "Y Combinator" [ref=f145e26] [cursor=pointer]:
+                            - /url: /channel/UCcefcZRL2oaA_uBNeo5UOWg
+                        - generic [ref=f145e28]:
+                          - button [ref=f145e29] [cursor=pointer]
+                          - generic [ref=f145e31]:
+                            - generic: Y Combinator
+                            - generic: 2.42M subscribers
+                      - button "Share" [ref=f145e35] [cursor=pointer]
+          - generic [ref=f138e201]: I think Jev hit a nerve because it gives developers a typed decision and a probability instead of generated text, without training a classifier for every task. I'd like to see more research labs build specialized foundation models for manufacturing, energy, and biology that work zero-shot or from a handful of examples. The bar is matching or beating general-purpose models at orders of magnitude less inference compute, so they're cheap enough to run on everything. For example, Google's TimesFM-3 shows what this looks like for forecasting. It's a 330M-parameter model that forecasts related time series at once with no task-specific fine-tuning and outputs the whole forecast in one forward pass. Training happens once, and each new user brings their own history as context. The hard part is getting high-quality, vertical-specific, verifiable rewards. You'll need rights to the data and a clear win in accuracy and compute over existing specialist models. If you know a field well enough to build its model, we'd like to hear from you.
+      - generic [ref=f138e205]:
+        - generic [ref=f138e206]:
+          - heading [level=3] [ref=f138e207]:
+            - text: AI for City Hall
+            - link "Copy link to AI for City Hall" [ref=f138e209] [cursor=pointer]:
+              - /url: "#ai-for-city-hall"
+          - generic [ref=f138e213]:
+            - text: By
+            - link "Gustaf Alströmer" [ref=f138e214] [cursor=pointer]:
+              - /url: https://www.ycombinator.com/people/gustaf-alstromer
+        - generic [ref=f138e215]:
+          - iframe [ref=f138e219]:
+            - generic [ref=f146e1]:
+              - generic "YouTube Video Player" [ref=f146e3]
+              - generic [ref=f146e5]:
+                - generic:
+                  - generic:
+                    - generic [ref=f146e6] [cursor=pointer]
+                    - button "Play video" [ref=f146e10] [cursor=pointer]
+                    - button "Hide player controls" [ref=f146e14] [cursor=pointer]
+                    - generic [ref=f146e16]:
+                      - generic [ref=f146e23]:
+                        - generic [ref=f146e24]:
+                          - link "AI for City Hall" [ref=f146e25] [cursor=pointer]:
+                            - /url: https://www.youtube.com/shorts/VoSVN7H07-Q
+                          - link "Y Combinator" [ref=f146e26] [cursor=pointer]:
+                            - /url: /channel/UCcefcZRL2oaA_uBNeo5UOWg
+                        - generic [ref=f146e28]:
+                          - button [ref=f146e29] [cursor=pointer]
+                          - generic [ref=f146e31]:
+                            - generic: Y Combinator
+                            - generic: 2.42M subscribers
+                      - button "Share" [ref=f146e35] [cursor=pointer]
+          - generic [ref=f138e220]: "If you want to build a house or start a business in America, you first need permission from your city. Forms, plan reviews, inspections, and many months of waiting. In some cities, getting the permit takes longer than building the house. City staff are buried in repetitive work: checking drawings against the code, matching applications to zoning rules, sending corrections back and forth. AI models can do all of this. And the delay really matters. Every month of waiting makes projects more expensive, and some just never get built. Every new building pays property tax for decades. We did some math: if all building permits in America were approved in 10% of the current time, US cities would make $16 billion a year in additional tax revenue. We want to fund companies that let AI help run City Hall. Start with permits, but also take on 311, public records, licensing, and inspections. There are 19,000 cities in America, and almost all of them still do all this by hand. The conventional wisdom says you can't sell software to government. That used to be true. It isn't anymore. YC has funded several companies selling AI to government, and some of them are growing faster than almost anything else we've seen. If you're building this, we'd love to hear from you."
+      - generic [ref=f138e224]:
+        - generic [ref=f138e225]:
+          - heading [level=3] [ref=f138e226]:
+            - text: Data Center Supply Chain
+            - link "Copy link to Data Center Supply Chain" [ref=f138e228] [cursor=pointer]:
+              - /url: "#data-center-supply-chain"
+          - generic [ref=f138e232]:
+            - text: By
+            - link "Jared Friedman" [ref=f138e233] [cursor=pointer]:
+              - /url: https://www.ycombinator.com/people/jared-friedman
+        - generic [ref=f138e234]:
+          - iframe [ref=f138e238]:
+            - generic [ref=f147e1]:
+              - generic "YouTube Video Player" [ref=f147e3]
+              - generic [ref=f147e5]:
+                - generic:
+                  - generic:
+                    - generic [ref=f147e6] [cursor=pointer]
+                    - button "Play video" [ref=f147e10] [cursor=pointer]
+                    - button "Hide player controls" [ref=f147e14] [cursor=pointer]
+                    - generic [ref=f147e16]:
+                      - generic [ref=f147e23]:
+                        - generic [ref=f147e24]:
+                          - link "Data Center Supply Chain" [ref=f147e25] [cursor=pointer]:
+                            - /url: https://www.youtube.com/shorts/9EJM4LNMK0I
+                          - link "Y Combinator" [ref=f147e26] [cursor=pointer]:
+                            - /url: /channel/UCcefcZRL2oaA_uBNeo5UOWg
+                        - generic [ref=f147e28]:
+                          - button [ref=f147e29] [cursor=pointer]
+                          - generic [ref=f147e31]:
+                            - generic: Y Combinator
+                            - generic: 2.42M subscribers
+                      - button "Share" [ref=f147e35] [cursor=pointer]
+          - generic [ref=f138e239]: "The AI data center buildout is the largest capital investment project in American history - bigger than the railroads, the highways, and the Manhattan Project - combined. A buildout that large creates opportunities up and down the supply chain. Some of them are famous - everyone knows that there's unprecedented demand for GPUs, electrical power, and skilled electricians. There are also many non-obvious bottlenecks. Large power transformers have a three-year lead time. Switchgear, circuit breakers, and liquid cooling equipment are all sold out. Even raw materials are under pressure: the grain-oriented electrical steel that's used in transformer cores is made in only a single plant in the US, and they're unable to keep up. We're interested in funding companies that are enabling every aspect of the data center supply chain. If that's something you're working on, we'd love to hear from you."
+      - generic [ref=f138e243]:
+        - generic [ref=f138e244]:
+          - heading [level=3] [ref=f138e245]:
+            - text: AI for the Air-Gapped Economy
+            - link "Copy link to AI for the Air-Gapped Economy" [ref=f138e247] [cursor=pointer]:
+              - /url: "#ai-for-the-air-gapped-economy"
+          - generic [ref=f138e251]:
+            - text: By
+            - link "Brad Flora" [ref=f138e252] [cursor=pointer]:
+              - /url: https://www.ycombinator.com/people/brad-flora
+        - generic [ref=f138e253]:
+          - iframe [ref=f138e257]:
+            - generic [ref=f148e1]:
+              - generic "YouTube Video Player" [ref=f148e3]
+              - generic [ref=f148e5]:
+                - generic:
+                  - generic:
+                    - generic [ref=f148e6] [cursor=pointer]
+                    - button "Play video" [ref=f148e10] [cursor=pointer]
+                    - button "Hide player controls" [ref=f148e14] [cursor=pointer]
+                    - generic [ref=f148e16]:
+                      - generic [ref=f148e23]:
+                        - generic [ref=f148e24]:
+                          - link "AI for the Air-Gapped Economy" [ref=f148e25] [cursor=pointer]:
+                            - /url: https://www.youtube.com/shorts/x21EgQzfZaM
+                          - link "Y Combinator" [ref=f148e26] [cursor=pointer]:
+                            - /url: /channel/UCcefcZRL2oaA_uBNeo5UOWg
+                        - generic [ref=f148e28]:
+                          - button [ref=f148e29] [cursor=pointer]
+                          - generic [ref=f148e31]:
+                            - generic: Y Combinator
+                            - generic: 2.42M subscribers
+                      - button "Share" [ref=f148e35] [cursor=pointer]
+          - generic [ref=f138e258]: "The most valuable data in the world isn't in the cloud. Defense contractors, banks, hospitals, and nuclear plants keep it behind walls, and they can't send it to an AI API. That's why so much of the economy is still waiting on AI. Founders we work with keep hitting the same wall: the customer loves the product and wants it running entirely inside their own building, with no internet connection. We want to fund the companies that bring frontier AI inside those walls. That means on-prem models, deployment tooling, security accreditation, and hardware. It's slower and harder to sell. It's also where the largest budgets and the most defensible companies are. If you're building this, we'd love to talk."
+      - generic [ref=f138e262]:
+        - generic [ref=f138e263]:
+          - heading [level=3] [ref=f138e264]:
+            - text: Own Your Intelligence
+            - link "Copy link to Own Your Intelligence" [ref=f138e266] [cursor=pointer]:
+              - /url: "#own-your-intelligence"
+          - generic [ref=f138e270]:
+            - text: By
+            - link "Jon Xu" [ref=f138e271] [cursor=pointer]:
+              - /url: https://www.ycombinator.com/people/jon-xu
+        - generic [ref=f138e272]:
+          - iframe [ref=f138e276]:
+            - generic [ref=f149e1]:
+              - generic "YouTube Video Player" [ref=f149e3]
+              - generic [ref=f149e5]:
+                - generic:
+                  - generic:
+                    - generic [ref=f149e6] [cursor=pointer]
+                    - button "Play video" [ref=f149e10] [cursor=pointer]
+                    - button "Hide player controls" [ref=f149e14] [cursor=pointer]
+                    - generic [ref=f149e16]:
+                      - generic [ref=f149e23]:
+                        - generic [ref=f149e24]:
+                          - link "Own Your Intelligence" [ref=f149e25] [cursor=pointer]:
+                            - /url: https://www.youtube.com/shorts/DzblM1Mc-J8
+                          - link "Y Combinator" [ref=f149e26] [cursor=pointer]:
+                            - /url: /channel/UCcefcZRL2oaA_uBNeo5UOWg
+                        - generic [ref=f149e28]:
+                          - button [ref=f149e29] [cursor=pointer]
+                          - generic [ref=f149e31]:
+                            - generic: Y Combinator
+                            - generic: 2.42M subscribers
+                      - button "Share" [ref=f149e35] [cursor=pointer]
+          - generic [ref=f138e277]: "Today, nearly every company building with AI rents its intelligence. You send tokens to a frontier lab, get answers back, and pay the bill. That was an easy trade when the best models were years ahead of everything else, and nothing you did with your own data could close the gap. That has changed. Open-weight models are now competitive with the top frontier models on meaningful benchmarks. And as AI moves to the center of how businesses run, companies have become more aware of their dependency on model rental. We think more companies will want to own the models they rely on: improve them on their own data, run them where they choose, and decide for themselves when they change. This matters most in regulated industries, where strict data governance and locked-down infrastructure make renting even more expensive for the performance they get. But there's still a big gap between downloading an open model and owning intelligence that improves a business. Someone has to turn workflows into evals, expertise into training data, production failures into improvements, and carry all of it forward with each new base model. Companies will keep renting frontier intelligence for their hardest problems, but we think many will also own specialized models that encode how their business works and that become more valuable as the business learns. If you're helping companies own their intelligence, we want to hear from you."

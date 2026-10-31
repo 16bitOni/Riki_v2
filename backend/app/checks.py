@@ -1,0 +1,62 @@
+"""Answer checks, run on every chat and inside evals.
+
+"Backed" means: every citation in a reply points at evidence that exists in this run's trace.
+A reply that cites [t7] when no tool returned t7, or a memory id that was never shown to the
+model, is a hallucinated citation and gets flagged on the run (free, deterministic).
+
+"Grounded" means: every specific claim in the reply is in the evidence. A model compares the two,
+because a reply that cites nothing at all passes the citation check while being made up.
+"""
+
+import json
+import re
+
+TOOL_REF = re.compile(r"\[(t\d+)\]")
+MEMORY_REF = re.compile(r"\[m:([0-9a-f]{8})\]")
+UNSUPPORTED = re.compile(r"^\W*UNSUPPORTED\W*:\s*(.+)$", re.I | re.M)
+
+
+# tools whose output is not evidence about the world: plumbing, or a sub-agent's retelling (its own tool calls count)
+NOT_EVIDENCE = {"load_tools", "connect_app", "spawn_agent", "remember"}
+
+
+def is_source(span: dict) -> bool:
+    return span["kind"] == "tool" and span["status"] == "ok" and span["name"] not in NOT_EVIDENCE
+
+
+def evidence(spans: list[dict], limit: int = 30_000) -> str:
+    """What the reply may rest on: tool results and memories, labelled with their refs."""
+    parts = [f"[{s.get('ref') or s['name']}] {s['output'] if isinstance(s['output'], str) else json.dumps(s['output'])}"
+             for s in spans if s.get("output") and (is_source(s) or s["kind"] == "memory"
+                                                    or s["name"] == "recall_memory")]
+    # shortcut: evidence past the limit is not checked, so claims from it get flagged; raise it if that happens
+    return "\n\n".join(parts)[:limit]
+
+
+def parse_unsupported(text: str) -> list[str]:
+    """Only `UNSUPPORTED:` lines count: some models think aloud first, and that prose must not become a flag."""
+    return [m.strip() for m in UNSUPPORTED.findall(text) if m.strip()][:8]
+
+
+def _norm(text: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[‐-―]", "-", text.replace("’", "'"))).lower()
+
+
+def drop_found(claims: list[str], proof: str) -> list[str]:
+    """A checker model sometimes flags an item that is right there in the evidence ("Title - Author"). If the
+    claim's head (before a dash, colon or bracket) appears word for word in the evidence, it is supported."""
+    proof = _norm(proof)
+    heads = [re.split(r" - |: | \(", _norm(c).strip("*\"' "), maxsplit=1)[0] for c in claims]
+    return [c for c, h in zip(claims, heads) if len(h) < 8 or h not in proof]
+
+
+def citation_check(reply: str, spans: list[dict]) -> dict:
+    tool_refs = {s["ref"] for s in spans if s.get("ref") and s["status"] == "ok"}
+    # memory ids the model could have seen: recall context and recall_memory/remember outputs
+    seen = " ".join(json.dumps(s.get("output"), default=str) for s in spans
+                    if s["kind"] == "memory" or s["name"] in ("recall_memory", "remember"))
+    cited_tools = set(TOOL_REF.findall(reply))
+    cited_memories = set(MEMORY_REF.findall(reply))
+    invalid = sorted(r for r in cited_tools if r not in tool_refs)
+    invalid += sorted(f"m:{m}" for m in cited_memories if m not in seen)
+    return {"citations": len(cited_tools) + len(cited_memories), "invalid_citations": invalid}
