@@ -51,6 +51,11 @@ class FakeMemory:
         return "## Memories that may be relevant to this message\n- [fact, 2026-01-01] Likes chai  " \
                "(id: abcdef0123456789abcdef0123456789)", []
 
+    blocks: dict = {}
+
+    async def get_blocks(self, user):
+        return self.blocks
+
     async def recall(self, user, query):
         return [], {}
 

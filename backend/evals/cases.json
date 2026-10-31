@@ -112,7 +112,7 @@
    "max_tool_calls": 0,
    "max_latency_ms": 12000,
    "max_tokens": 8000,
-   "judge": "A short friendly greeting of at most three short sentences. Light, friendly teasing counts as friendly (the user's persona asks for it). It uses no tool, does not recite memories and invents no facts."
+   "judge": "A short friendly greeting of at most three short sentences. Light, friendly teasing counts as friendly (the user's persona asks for it). It uses no tool, may use something it knows about the user naturally but does not list or recite memories and invents no facts."
   }
  },
  {

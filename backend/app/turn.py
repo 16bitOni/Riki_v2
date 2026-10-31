@@ -52,13 +52,35 @@ async def ensure_thread(rt: Runtime, thread_id: str | None, first_message: str) 
         return thread.id
 
 
+MIN_HISTORY_TURNS = 4  # however long they are, so a pasted document never makes Riki forget the last exchange
+
+
 async def _history(rt: Runtime, thread_id: str) -> list:
-    """Last N turns as plain text. Tool calls stay in the trace, out of future context."""
+    """Recent turns as plain text, as many as fit in ``history_chars`` (never fewer than MIN_HISTORY_TURNS, never more
+    than ``history_turns``). Short banter keeps its texture; one long paste does not drown the rest.
+    Tool calls stay in the trace, out of future context."""
     async with rt.db.session() as s:
         rows = (await s.scalars(select(Message).where(Message.thread_id == thread_id)
                                 .order_by(Message.created_at.desc()).limit(2 * rt.settings.history_turns))).all()
+    kept, size = [], 0
+    for i, m in enumerate(rows):  # newest first; cut only between exchanges, so a reply keeps its question
+        size += len(m.content)
+        if i % 2 == 0 and i >= 2 * MIN_HISTORY_TURNS and size > rt.settings.history_chars:
+            break
+        kept.append(m)
     note = lambda m: f"{m.content}\n[{len(m.images)} image(s) attached]" if m.images else m.content  # noqa: E731
-    return [HumanMessage(note(m)) if m.role == "user" else AIMessage(m.content) for m in reversed(rows)]
+    return [HumanMessage(note(m)) if m.role == "user" else AIMessage(m.content) for m in reversed(kept)]
+
+
+async def core_context(rt: Runtime, user: str) -> str:
+    """What small talk knows: the core blocks (who they are, how they like things, the people and projects that
+    matter), no search and no model call. Greetings used to get nothing, so "hey" met a stranger."""
+    try:
+        blocks = await asyncio.wait_for(rt.memory.get_blocks(user), 2)
+    except Exception:
+        return ""
+    lines = [f"{label}:\n" + "\n".join(f"- {t}" for t in texts) for label, texts in (blocks or {}).items() if texts]
+    return f"## About {rt.settings.user_name} (core memory)\n" + "\n".join(lines)[:1500] if lines else ""
 
 
 async def _sources(rt: Runtime, ctx: RunContext, thread_id: str) -> list[dict]:
@@ -147,7 +169,9 @@ async def run_turn(rt: Runtime, ctx: RunContext, thread_id: str, text: str, *, l
     output, status, error, known, unsupported = "", "ok", None, [], None
     try:
         memory_text, small = "", is_small_talk(text, rt.persona.name)
-        if not small:
+        if small:
+            memory_text = await core_context(rt, memory_user)
+        else:
             try:
                 async with span("memory", "recall", input=text) as sp:
                     recent = "\n".join(f"{'User' if isinstance(m, HumanMessage) else 'Riki'}: {m.content}"

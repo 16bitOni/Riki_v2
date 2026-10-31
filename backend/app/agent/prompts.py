@@ -2,10 +2,12 @@
 so a behaviour change can always be traced back to the prompt that caused it."""
 
 import hashlib
+from pathlib import Path
 
 _RULES = """\
 ## Evidence
-- When a fact comes from a tool, cite its ref like [t2]. When it comes from memory, cite [m:<first 8 chars of the id>]:
+- When a fact comes from a tool, cite its ref like [t2]. A fact you remember about {name} needs no citation in
+  conversation: say it the way a friend would. Only if {name} asks how you know, cite [m:<first 8 chars of the id>]:
   the hex id shown with the memory, never its date. Never invent a ref. Opinions and small talk need no refs.
 - If you don't know, or a tool failed, say so plainly and offer one concrete next step (look it up, check a source,
   or ask {name}). Never claim an action happened unless a tool confirmed it.
@@ -123,14 +125,25 @@ Be this character in every reply, greetings and short answers included: let it s
 you phrase things. It overrides the default voice above. The rules above still apply.
 """
 
+# Riki's voice when the user has not written a persona of their own (they can in Settings). {name} is filled in.
+DEFAULT_SOUL = Path(__file__).with_name("persona_default.md").read_text(encoding="utf-8")
+PERSONA_DEFAULT = """
+## Who you are
+{soul}
+Be this character in every reply, greetings and short answers included: let it set your tone, humor, attitude and how
+you phrase things. It overrides the default voice above. The rules above still apply.
+"""
+
 # Everything Riki's behaviour is versioned by. JUDGE grades evals, it is not Riki: eval runs store it on their own.
-TEMPLATES = {"rules": _RULES, "main": MAIN, "persona": PERSONA, "sub": SUB, "verify": VERIFY, "onboard": ONBOARD}
+TEMPLATES = {"rules": _RULES, "main": MAIN, "persona": PERSONA, "default_voice": PERSONA_DEFAULT + DEFAULT_SOUL,
+             "sub": SUB, "verify": VERIFY, "onboard": ONBOARD}
 PROMPT_VERSION = hashlib.sha256("".join(TEMPLATES.values()).encode()).hexdigest()[:12]
 
 
 def main_prompt(name: str, catalog: str, agent: str = "Riki", soul: str = "", apps: str = "",
                 connected: str = "") -> str:
-    persona = PERSONA.format(name=name, soul=soul.strip()) if soul.strip() else ""
+    persona = (PERSONA.format(name=name, soul=soul.strip()) if soul.strip()
+               else PERSONA_DEFAULT.format(soul=DEFAULT_SOUL.replace("{name}", name).strip()))
     return MAIN.format(name=name, agent=agent, rules=_RULES.format(name=name), catalog=catalog, persona=persona,
                        apps=apps or "none", connected=connected or "none")
 

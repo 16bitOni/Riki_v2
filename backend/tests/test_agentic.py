@@ -222,3 +222,44 @@ def test_secrets_saved_under_the_old_key_still_open_and_move_to_the_new_one():
     with pytest.raises(Exception):
         old.decrypt(moved)
     assert box.decrypt(moved) == b'{"token": "t"}'
+
+
+async def test_small_talk_knows_who_it_is_talking_to_without_a_search(make_runtime):
+    seen: list[str] = []
+
+    def respond(messages):
+        seen.append(str(messages[-1].content))
+        return AIMessage("hey!")
+
+    rt = await make_runtime(respond)
+    rt.memory.blocks = {"identity": ["Sub builds AI agents"], "preferences": ["likes short answers"]}
+    searched: list[str] = []
+
+    async def no_search(*a, **kw):
+        searched.append("search")
+        return "", []
+
+    rt.memory.context = no_search
+    app.state.rt = rt
+    async with _client() as c:
+        await c.post("/api/login", json=AUTH)
+        await _chat(c, "hi riki!")
+    assert searched == []
+    assert "Sub builds AI agents" in seen[0] and "likes short answers" in seen[0]
+
+
+def test_riki_has_a_voice_of_its_own_unless_the_user_writes_one():
+    from app.agent.prompts import main_prompt
+
+    default = main_prompt("Sam", "(none)")
+    assert "Sam's best friend" in default and "lowercase energy" in default
+    assert "{name}" not in default and " him " not in default  # filled in, and no guess at a pronoun
+    custom = main_prompt("Sam", "(none)", soul="Be a pirate.")
+    assert "Be a pirate." in custom and "lowercase energy" not in custom
+
+
+def test_remembered_facts_are_said_like_a_friend_not_cited():
+    from app.agent.prompts import main_prompt
+
+    p = main_prompt("Sam", "(none)")
+    assert "needs no citation in" in p and "cite its ref like [t2]" in p

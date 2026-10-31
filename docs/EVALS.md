@@ -82,3 +82,11 @@ the reply you like best, with the original v1 reply mixed in as one candidate. U
 the persona, the main model or its temperature. Steps are in the file's docstring; `evals/persona_v1.md` holds v1's
 voice, ready to paste into Settings > Persona. Replays are sent with `learn=false`, so nothing is saved to memory.
 Results stay in `evals/results/` (git-ignored, since they contain your own messages).
+
+## Baseline log
+
+Each row is a full run of `uv run python -m evals.run --repeat N`. Compare a change against the row before it.
+
+| Date | Commit | Model | Prompt | Result | Notes |
+|---|---|---|---|---|---|
+| 2026-10-31 | `f171c7f` | claude-haiku-4-5 | 1d7c178e7e80 | 16/21 at pass^5 (about 91% of single tries) | The base for Phase 1. Failing: web-grounded (2/5), count-from-source (3/5), setup-scan-read-only (3/5), greeting (4/5), knows-it-already (4/5). The last two are judge noise. |

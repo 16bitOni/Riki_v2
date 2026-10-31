@@ -69,7 +69,8 @@ class Settings(BaseSettings):
     tool_timeout_s: float = 60
     run_timeout_s: float = Field(600, gt=0)  # whole request, all agents; covers sub-agents and hung model calls
     tool_output_chars: int = 6_000  # what the model sees; the trace keeps more
-    history_turns: int = 8
+    history_turns: int = 40  # most turns of this chat sent to the model...
+    history_chars: int = Field(16_000, ge=1_000)  # ...cut from the oldest end past this many characters (4 turns always stay)
     approval_timeout_s: int = 300
     # Memory before the model answers: "heuristic" plans the search with regex (no extra model call; the model can
     # still call recall_memory itself), "escalate" asks a planner model when that finds nothing, "llm" always does.
