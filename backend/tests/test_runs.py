@@ -169,3 +169,15 @@ async def test_runs_left_running_by_a_restart_are_closed_with_a_message(make_run
         assert run.status == "error" and "restarted" in run.error
         reply = (await s.scalars(select(Message).where(Message.thread_id == thread.id))).one()
         assert reply.role == "assistant" and "restarted" in reply.content
+
+
+async def test_a_message_can_ask_not_to_be_learned(make_runtime):
+    rt = await _runtime(make_runtime)
+    async with _client() as client:
+        await client.post("/api/login", json=AUTH)
+        await _events(client, "/api/chat", method="POST", json={"message": "just chatting", "learn": False})
+        await asyncio.gather(*rt.background)
+        assert rt.memory.remembered == []
+        await _events(client, "/api/chat", method="POST", json={"message": "just chatting again"})
+        await asyncio.gather(*rt.background)
+        assert len(rt.memory.remembered) == 1

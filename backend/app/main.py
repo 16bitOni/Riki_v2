@@ -385,6 +385,7 @@ class ChatIn(BaseModel):
     thread_id: HexId | None = None  # none = a new side chat
     images: list[str] = Field(default_factory=list, max_length=4)  # data: URLs; the browser shrinks them first
     effort: Effort | None = None  # none = RIKI_DEFAULT_EFFORT
+    learn: bool = True  # false: answer, but do not save anything from this message (replays, experiments)
 
     @field_validator("message")
     @classmethod
@@ -417,7 +418,7 @@ async def chat(body: ChatIn, rt: Auth):
     if busy := rt.active_run(thread_id):  # no await from here to start_run, so two fast POSTs can't both pass
         raise HTTPException(409, {"message": "Riki is still working on your last message in this chat.",
                                   "run_id": busy.run_id})
-    ctx = start_run(rt, thread_id, body.message, images=body.images, effort=body.effort)
+    ctx = start_run(rt, thread_id, body.message, images=body.images, effort=body.effort, learn=body.learn)
     return _follow(ctx, 0, first={"type": "thread", "thread_id": thread_id, "run_id": ctx.run_id})
 
 

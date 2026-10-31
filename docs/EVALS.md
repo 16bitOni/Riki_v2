@@ -74,3 +74,11 @@ written. Eval threads are deleted afterwards; their runs and traces stay.
   then fix.
 - Every bad answer you see is a free eval case. Add it to `cases.json` before fixing it, so it never
   comes back.
+
+## Voice A/B (does it sound like you want?)
+
+`backend/evals/voice_ab.py` replays real messages against a running Riki and builds a blind sheet where you pick
+the reply you like best, with the original v1 reply mixed in as one candidate. Use it before and after changing
+the persona, the main model or its temperature. Steps are in the file's docstring; `evals/persona_v1.md` holds v1's
+voice, ready to paste into Settings > Persona. Replays are sent with `learn=false`, so nothing is saved to memory.
+Results stay in `evals/results/` (git-ignored, since they contain your own messages).
