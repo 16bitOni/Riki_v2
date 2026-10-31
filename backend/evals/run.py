@@ -16,7 +16,9 @@ import json
 import re
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
@@ -80,11 +82,19 @@ def check_case(expect: dict, output: str, spans: list[dict], latency_ms: int, to
 
 
 async def judge(rt: Runtime, rubric: str, message: str, output: str, spans: list[dict]) -> Verdict:
-    evidence = "\n".join(f"[{s['ref']}] {s['name']}: {json.dumps(s['output'], default=str)[:1500]}"
-                         for s in spans if s["kind"] == "tool")[:8000] or "(no tools used)"
-    model = rt.models["fast"].with_structured_output(Verdict)
-    return await model.ainvoke([SystemMessage(JUDGE), HumanMessage(
-        f"Rubric: {rubric}\n\nUser message:\n{message}\n\nAgent reply:\n{output}\n\nTool evidence:\n{evidence}")])
+    # Wide enough for a whole fetched page: a judge that sees half of the evidence calls the other half invented.
+    evidence = "\n".join(f"[{s['ref']}] {s['name']}: {json.dumps(s['output'], default=str)[:8000]}"
+                         for s in spans if s["kind"] == "tool")[:40_000] or "(no tools used)"
+    now = datetime.now(ZoneInfo(rt.settings.timezone)).strftime("%A %d %B %Y, %H:%M %Z")
+    prompt = [SystemMessage(JUDGE), HumanMessage(
+        f"Rubric: {rubric}\n\nUser message:\n{message}\n\nAgent reply:\n{output}\n\nTool evidence:\n{evidence}\n\n"
+        f"Context the agent is always given (you cannot see the rest of it): the current date and time, {now}, and "
+        "the user's stored memories. Using the date, time or weekday is not inventing a fact.")]
+    try:  # the stronger model grades; a fast model grading itself is noisy (same reply, three different verdicts)
+        return await rt.models["smart"].with_structured_output(Verdict).ainvoke(prompt)
+    except Exception as exc:  # e.g. the smart model cannot do structured output on this gateway
+        print(f"  (smart judge failed: {type(exc).__name__}; using the fast model)", file=sys.stderr)
+        return await rt.models["fast"].with_structured_output(Verdict).ainvoke(prompt)
 
 
 async def attempt(rt: Runtime, case: dict) -> dict:
@@ -97,7 +107,9 @@ async def attempt(rt: Runtime, case: dict) -> dict:
         rt.apps.state[app] = {"state": "disconnected"}
     message = scrub(clean(case["input"]), "[secret removed]")  # what main.ChatIn does before a message reaches a run
     thread_id = await ensure_thread(rt, None, f"[eval] {case['id']}")
-    ctx = RunContext(run_id=new_id(), source="eval", memory_user=EVAL_MEMORY_USER)
+    # same limits as real chats unless a case says otherwise (RunContext alone defaults to the largest, "high")
+    ctx = RunContext(run_id=new_id(), source="eval", memory_user=EVAL_MEMORY_USER,
+                     effort=case.get("effort") or rt.settings.default_effort)
     started = time.perf_counter()
     try:
         # own task: run_turn sets the RUN context var, which must not leak between attempts

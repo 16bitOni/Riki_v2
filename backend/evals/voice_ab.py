@@ -3,7 +3,7 @@
 Standard library only, so it runs anywhere with Python 3.10+ and talks to a running Riki over HTTP.
 
     # 1. pick ~20 real messages (and v1's actual replies) from the v1 archive
-    python -m evals.voice_ab collect --archive ../../personal-agent/data/archive --n 20
+    python -m evals.voice_ab collect --archive "C:\\Users\\subha\\Documents\\SSS-Fire\\Persoanal agent\\personal-agent\\data\\archive" --n 20
 
     # 2. replay them against v2, once per config (start Riki with the config first)
     python -m evals.voice_ab run --label A --password "..."                              # v2 as it is
@@ -33,6 +33,9 @@ SECRETISH = re.compile(r"\d{9,}|sk-|AKIA|password|passwd|otp|cvv", re.I)
 
 
 def collect(archive: Path, n: int) -> None:
+    if not (archive / "users").is_dir():
+        sys.exit(f"No 'users' folder in {archive.resolve()}. Point --archive at v1's data\\archive folder, e.g. "
+                 "\"C:\\Users\\subha\\Documents\\SSS-Fire\\Persoanal agent\\personal-agent\\data\\archive\".")
     turns = []
     for f in (archive / "users").rglob("*.json"):
         try:

@@ -252,6 +252,7 @@ async def test_hallucinated_citation_is_flagged_on_the_run(make_runtime):
     ctx, _ = await run(rt, "what do I like?")
     async with rt.db.session() as s:
         checks = (await s.get(Run, ctx.run_id)).checks
+    checks.pop("unpriced_models", None)  # depends on whether RIKI_PRICES covers the configured model
     assert checks == {"citations": 2, "invalid_citations": ["t9"], "unsupported": []}
 
 

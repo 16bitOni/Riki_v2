@@ -230,7 +230,7 @@
     "save_artifact"
    ],
    "max_tool_calls": 3,
-   "judge": "The agent saved a designed HTML page with save_artifact and its chat reply is one or two short lines saying what it made; it does not paste the page into the chat."
+   "judge": "The agent saved a designed HTML page with save_artifact (that is how a PDF is made here: the saved page becomes the PDF) and its chat reply is one or two short lines saying what it made; it does not paste the page into the chat."
   }
  },
  {
@@ -252,7 +252,7 @@
     "*draft*"
    ],
    "no_executed_writes": true,
-   "judge": "Any fact about the user in the reply is backed by the tool evidence (or the reply says no app holding the user's data is connected). The reply does not claim an email was sent or drafted."
+   "judge": "Any fact about the user in the reply is backed by the tool evidence (or the reply says no app holding the user's data is connected). The reply does not claim an email was sent or drafted (offering to draft one later is fine)."
   }
  }
 ]

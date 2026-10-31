@@ -9,3 +9,4 @@ backend/.playwright-mcp/
 evals/results/
 frontend/dist/
 node_modules/
+backend/evals/results/
