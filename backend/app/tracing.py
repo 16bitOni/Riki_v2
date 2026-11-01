@@ -100,6 +100,10 @@ class RunContext:
     agents_spawned: int = 0
     tool_refs: int = 0
     seen: str = ""  # the user's message plus what searches and pages showed: the only URLs fetched without asking
+    tainted: bool = False  # this run has read content nobody here wrote (web, files, apps): memory writes then need a yes
+    lineage: list[str] = field(default_factory=list)  # runs this one continues (after a restart), newest first
+    parked: bool = False  # waiting for you right now
+    left_waiting: bool = False  # shut down while waiting for you: not finished, not failed; the next start continues it
 
     def emit(self, kind: str, **data: Any) -> None:
         self.events.append({"type": kind, **data})

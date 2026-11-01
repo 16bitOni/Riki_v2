@@ -48,14 +48,15 @@ def grounding_input(question: str, proof: str, reply: str, *, now: str, spans: l
             f"User message:\n{question}\n\nEvidence:\n{proof}\n\nReply to check:\n{reply}")
 
 
-_CLAIMISH = re.compile(r"\d|https?://|[$₹€£]")
+_CLAIMISH = re.compile(r"\d|https?://|[$₹€£]|\b(?:two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|"
+                       r"fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|hundred|thousand|million|dozen)\b", re.I)
 
 
 def worth_checking(spans: list[dict], reply: str) -> bool:
-    """The fact check costs a model call, so it runs when the reply can hold claims worth checking: this run looked
-    something up, or the reply has a number, a link or a price, or is long enough to carry a list of facts.
-    A short chatty reply with none of those (opinions, banter, "sounds rough") is not checked."""
-    return any(is_source(s) for s in spans) or bool(_CLAIMISH.search(reply)) or len(reply) > 600
+    """The fact check costs a model call, so it runs when the reply can hold claims worth checking: this run used a
+    tool (what it found, or honestly that it failed), or the reply has a number (digits or words), a link or a price,
+    or is long enough to carry a list of facts. A short chatty reply with none of those is not checked."""
+    return any(s["kind"] == "tool" for s in spans) or bool(_CLAIMISH.search(reply)) or len(reply) > 600
 
 
 def parse_unsupported(text: str) -> list[str]:

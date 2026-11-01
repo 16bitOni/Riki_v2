@@ -26,10 +26,14 @@ from riki_memory import MemoryCreate
 from .agent import policy
 from .agent.prompts import ONBOARD
 from .apps import CATALOG, CATEGORIES, ROLES, search_directory
+from .cognition import feedback_lesson, latest_reflection, save_edit
 from .config import Effort, get_settings
-from .db import Approval, Artifact, Connection, EvalRun, Feedback, Message, Persona, Run, Span, Thread, new_id, utcnow
+from .db import (Approval, Artifact, Connection, EvalRun, Feedback, Message, Persona, Run, Schedule, Span, Thread, new_id,
+                 utcnow)
+from .files import Unreadable, save_upload
 from .ops import LOGS, beat, own_thread
 from .runtime import Runtime
+from .spend import budget_state, spend_today
 from .tracing import clean, scrub
 from .turn import ensure_thread, start_run
 
@@ -106,7 +110,8 @@ async def me(rt: Auth):
     return {"name": s.user_name, "agent_name": p.name, "hue": p.hue, "model": s.model, "smart_model": s.smart_model,
             "avatar": f"/api/persona/avatar?v={int(p.updated_at.timestamp())}" if p.avatar_type else None,
             "prompt_version": rt.prompt_version, "max_depth": s.max_depth, "quiet_hours": s.quiet_hours,
-            "timezone": s.timezone, "default_effort": s.default_effort, "role": p.role, "onboarded": p.onboarded}
+            "timezone": s.timezone, "default_effort": s.default_effort, "role": p.role, "onboarded": p.onboarded,
+            "telegram": rt.telegram is not None}
 
 
 # --- persona and heartbeat --------------------------------------------------------------------
@@ -455,11 +460,13 @@ async def stop_run(run_id: HexId, rt: Auth):
 
 class DecisionIn(BaseModel):
     approve: bool
+    answer: str | None = Field(None, max_length=500)  # for ask_user: the choice made
+    grant: bool = False  # allow this tool in this chat for 30 minutes (never for money)
 
 
 @app.post("/api/approvals/{approval_id}")
 async def decide(approval_id: HexId, body: DecisionIn, rt: Auth):
-    if not policy.decide(approval_id, body.approve):
+    if not await policy.decide(rt.db, approval_id, body.approve, answer=body.answer, grant=body.grant):
         raise HTTPException(409, "this approval is no longer pending")
     return {"ok": True}
 
@@ -532,7 +539,7 @@ async def thread_messages(thread_id: HexId, rt: Auth):
         run_ids = [m.run_id for m in rows if m.run_id and m.role == "assistant"]
         scores = dict((await s.execute(select(Feedback.run_id, Feedback.score).where(
             Feedback.run_id.in_(run_ids)))).all())
-        runs_ = {r.id: r for r in (await s.execute(select(Run.id, Run.latency_ms, Run.error, Run.checks).where(Run.id.in_(run_ids)))).all()}
+        runs_ = {r.id: r for r in (await s.execute(select(Run.id, Run.latency_ms, Run.error, Run.checks, Run.cost_usd).where(Run.id.in_(run_ids)))).all()}
         steps: dict[str, list] = {}
         for sp in (await s.scalars(select(Span).where(Span.run_id.in_(run_ids), Span.kind != "llm")
                                    .order_by(Span.started_at))).all():
@@ -545,7 +552,8 @@ async def thread_messages(thread_id: HexId, rt: Auth):
              "feedback": scores.get(m.run_id) if m.role == "assistant" else None, "created_at": m.created_at,
              **({"steps": steps.get(m.run_id, []), "latency_ms": getattr(runs_.get(m.run_id), "latency_ms", None),
                  "error": getattr(runs_.get(m.run_id), "error", None),
-                 "checks": getattr(runs_.get(m.run_id), "checks", None) or {}}
+                 "checks": getattr(runs_.get(m.run_id), "checks", None) or {},
+                 "cost_usd": getattr(runs_.get(m.run_id), "cost_usd", None)}
                 if m.role == "assistant" else {})}
             for m in rows[-200:]]
 
@@ -613,6 +621,11 @@ async def feedback(run_id: HexId, body: FeedbackIn, rt: Auth):
             raise HTTPException(404, "no such run")
         await s.merge(Feedback(run_id=run_id, score=body.score, comment=body.comment))
         await s.commit()
+    if body.score < 0 and body.comment.strip():  # the clearest lesson there is: remember it as a preference
+        try:
+            await feedback_lesson(rt, run_id, body.comment)
+        except Exception:
+            log.exception("could not save the lesson from feedback")
     return {"ok": True}
 
 
@@ -851,6 +864,80 @@ async def correct_memory(memory_id: HexId, body: MemoryEditIn, rt: Auth):
 @app.delete("/api/memories/{memory_id}")
 async def delete_memory(memory_id: HexId, rt: Auth):
     return {"deleted": await rt.memory.delete(rt.settings.user_id, memory_id)}
+
+
+# --- Riki's read on you, files, schedules, spend ----------------------------------------------
+
+def _reflection(r) -> dict | None:
+    return None if r is None else {"id": r.id, "content": r.content, "source": r.source, "memory_count": r.memory_count,
+                                   "created_at": r.created_at, "run_id": r.run_id}
+
+
+@app.get("/api/reflection")
+async def get_reflection(rt: Auth):
+    return _reflection(await latest_reflection(rt))
+
+
+class ReflectionIn(BaseModel):
+    content: str = Field(min_length=10, max_length=4000)
+
+
+@app.put("/api/reflection")
+async def put_reflection(body: ReflectionIn, rt: Auth):
+    """"That's not right": your wording becomes the newest version, and later versions keep your corrections."""
+    return _reflection(await save_edit(rt, body.content))
+
+
+@app.post("/api/uploads")
+async def upload(request: Request, rt: Auth, name: str = Query("file", max_length=200)):
+    """A file to talk about (PDF, Word, Excel, CSV, text), sent as the raw request body. Riki reads it with read_file."""
+    limit = rt.settings.upload_max_mb * 1024 * 1024
+    data = bytearray()
+    async for chunk in request.stream():
+        data += chunk
+        if len(data) > limit:
+            raise HTTPException(413, f"That file is over {rt.settings.upload_max_mb} MB.")
+    try:
+        return await save_upload(rt, name, bytes(data))
+    except Unreadable as exc:
+        raise HTTPException(415, str(exc))
+
+
+@app.get("/api/schedules")
+async def schedules(rt: Auth):
+    async with rt.db.session() as s:
+        rows = (await s.scalars(select(Schedule).where(Schedule.status == "active").order_by(Schedule.next_at).limit(100))).all()
+    return [_row(r) for r in rows]
+
+
+@app.delete("/api/schedules/{schedule_id}")
+async def cancel_schedule(schedule_id: HexId, rt: Auth):
+    async with rt.db.session() as s:
+        row = await s.get(Schedule, schedule_id)
+        if row is None:
+            raise HTTPException(404, "no such schedule")
+        row.status = "cancelled"
+        await s.commit()
+    return {"ok": True}
+
+
+@app.get("/api/spend")
+async def spend(rt: Auth):
+    """Today's spend against RIKI_DAILY_BUDGET_USD; only priced models count (RIKI_PRICES)."""
+    return {"spent_usd": await spend_today(rt), "budget_usd": rt.settings.daily_budget_usd, "state": await budget_state(rt)}
+
+
+@app.get("/api/cost/models")
+async def cost_by_model(rt: Auth, days: int = Query(7, ge=1, le=90)):
+    """Tokens and cache hits per model (from the model-call spans): is the prompt cache actually working?"""
+    sql = text("""
+        select name as model, count(*) as calls, coalesce(sum(tokens_in), 0)::int as tokens_in,
+               coalesce(sum(tokens_out), 0)::int as tokens_out, coalesce(sum(tokens_cached), 0)::int as tokens_cached,
+               coalesce(sum(tokens_cached)::float / nullif(sum(tokens_in), 0), 0) as cache_ratio
+        from spans where kind = 'llm' and started_at > now() - make_interval(days => :days)
+        group by name order by 3 desc""")
+    async with rt.db.session() as s:
+        return [dict(r) for r in (await s.execute(sql, {"days": days})).mappings().all()]
 
 
 # --- evals and health metrics -----------------------------------------------------------------

@@ -69,8 +69,35 @@ async def beat(rt: "Runtime", persona: Persona) -> str:
     return ctx.run_id
 
 
+async def resume_waiting_runs(rt: "Runtime") -> int:
+    """On startup: a run that was waiting for your OK when Riki last stopped is started again (its approval is still
+    there, and anything it already did is not done twice; see agent/policy.py). Anything older than a day is closed."""
+    from .turn import start_run
+
+    cutoff = utcnow() - timedelta(hours=24)
+    async with rt.db.session() as s:
+        waiting = (await s.scalars(select(Run).where(Run.status == "waiting"))).all()
+        resume, images = [], {}
+        for r in waiting:
+            fresh = r.source == "chat" and r.thread_id and r.created_at > cutoff
+            r.status, r.error = "error", ("Riki restarted while this waited for you; it continues as a new run."
+                                          if fresh else "Interrupted: waited too long, or was not a chat.")
+            if fresh:
+                resume.append(r)
+                m = await s.scalar(select(Message).where(Message.run_id == r.id, Message.role == "user").limit(1))
+                images[r.id] = (m.images or None) if m else None
+        await s.commit()
+    started = 0
+    for r in resume:
+        if rt.active_run(r.thread_id) is None:
+            start_run(rt, r.thread_id, r.input, images=images.get(r.id), effort=r.effort, resume_of=r.id)
+            started += 1
+    return started
+
+
 async def interrupt_stale_runs(db) -> None:
-    """On startup: a run left 'running' by a previous process will never finish. Say so in its chat."""
+    """On startup: a run left 'running' by a previous process will never finish. Say so in its chat.
+    (Runs left 'waiting' for you are different: resume_waiting_runs continues them.)"""
     async with db.session() as s:
         for run in (await s.scalars(select(Run).where(Run.status == "running"))).all():
             run.status, run.error = "error", "Interrupted: Riki restarted while this was running."
@@ -80,16 +107,60 @@ async def interrupt_stale_runs(db) -> None:
         await s.commit()
 
 
+def policy_shutting_down() -> bool:
+    from .agent import policy
+
+    return policy.SHUTTING_DOWN
+
+
 def in_quiet_hours(hour: int, spec: str) -> bool:
     """"22-8" covers 22:00 to 07:59 (wraps midnight); "0-0" means never quiet."""
     start, end = (int(x) % 24 for x in spec.split("-"))
     return start <= hour < end if start <= end else hour >= start or hour < end
 
 
+async def background_work(rt: "Runtime") -> None:
+    """Riki thinking about you between chats: a fresh read, lessons from quiet chats, a thinking cycle. Each part
+    decides for itself whether there is anything new (no input, no model call), and all pause when the day's budget
+    is mostly spent."""
+    from .cognition import learn_lessons, refresh_reflection, run_cycle
+    from .spend import budget_state
+
+    if await budget_state(rt) != "ok":
+        return
+    for name, job in (("reflection", refresh_reflection), ("lessons", learn_lessons), ("cycle", run_cycle)):
+        try:
+            await job(rt)
+        except Exception:
+            log.exception("background %s failed", name)
+
+
 async def heartbeat_loop(rt: "Runtime", tick_s: float = 60) -> None:
-    """Checks once a minute whether a heartbeat is due. Never dies on an error."""
+    """Once a minute: schedules that came due, every few minutes the thinking work, and the check-in if one is due.
+    Never dies on an error."""
+    from .schedules import fire_due
+
+    ticks, busy = 0, False
+
+    async def think():
+        nonlocal busy
+        try:
+            await background_work(rt)
+        finally:
+            busy = False
+
     while True:
         await asyncio.sleep(tick_s)
+        ticks += 1
+        try:
+            await fire_due(rt)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("schedules failed")
+        if ticks % 5 == 0 and not busy and not policy_shutting_down():
+            busy = True
+            rt.spawn(think())
         try:
             async with rt.db.session() as s:
                 persona = await s.get(Persona, 1)

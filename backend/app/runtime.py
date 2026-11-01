@@ -16,13 +16,17 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from .agent.graph import SUB_AGENT_BASE_TOOLS, Agent
 from .apps import CATALOG, Apps
 from .agent.mcp import load_mcp
+from .agent import policy
 from .agent.policy import expire_stale
 from .agent.prompts import PROMPT_VERSION, TEMPLATES, main_prompt, persona_version, sub_prompt
 from .agent.tools import ToolRegistry, builtin_tools
 from .config import BACKEND_DIR, Settings
 from .db import Database, Persona, PromptVersion, utcnow
 from .memory import LangChainProvider
-from .ops import heartbeat_loop, interrupt_stale_runs
+from .files import file_tools
+from .ops import heartbeat_loop, interrupt_stale_runs, resume_waiting_runs
+from .sandbox import sandbox_tools
+from .schedules import schedule_tools
 
 log = logging.getLogger(__name__)
 
@@ -71,9 +75,11 @@ class Runtime:
         self.runs: dict[str, tuple] = {}  # run_id -> (RunContext, task): followable, stoppable (see turn.start_run)
         self.mcp_status: dict[str, dict] = {}
         self._heartbeat: asyncio.Task | None = None
+        self.telegram = None  # the phone channel, when RIKI_TELEGRAM_TOKEN and RIKI_TELEGRAM_CHAT_ID are set
 
     async def start(self) -> None:
         s = self.settings
+        policy.SHUTTING_DOWN = False
         self.db = Database(s.database_url)
         await self._check_schema()
         self.models = self._models or {"fast": _model(s.model, s), "smart": _model(s.smart_model, s)}
@@ -93,7 +99,8 @@ class Runtime:
 
         self.registry = ToolRegistry()
         self.agent = Agent(self)
-        for entry in [*builtin_tools(self), *self.agent.agent_tools(),
+        for entry in [*builtin_tools(self), *schedule_tools(self), *file_tools(self), *sandbox_tools(self),
+                      *self.agent.agent_tools(),
                       *self._extra_tools, *await load_mcp(s.mcp_config, self._stack, self.mcp_status)]:
             self.registry.add(entry)
         unknown = [n for n in s.core_tools if self.registry.get(n) is None]
@@ -105,6 +112,12 @@ class Runtime:
         self.apps = Apps(self)
         await self.apps.start()
         self._heartbeat = asyncio.create_task(heartbeat_loop(self))
+        if s.telegram_token and s.telegram_chat_id:
+            from .channels.telegram import TelegramChannel
+
+            self.telegram = TelegramChannel(self, s.telegram_token.get_secret_value(), s.telegram_chat_id)
+            await self.telegram.start()
+        self.spawn(resume_waiting_runs(self))  # requests that were waiting for you when Riki last stopped
 
     async def reload_persona(self) -> Persona:
         """(Re)build the system prompts. Only here and on persona edits, so the prompt stays byte-stable
@@ -142,9 +155,15 @@ class Runtime:
                                "Run: uv run alembic upgrade head")
 
     async def stop(self) -> None:
+        policy.SHUTTING_DOWN = True  # runs waiting for you stay waiting, so the next start can continue them
+        if self.telegram is not None:
+            await self.telegram.stop()
         if self._heartbeat:
             self._heartbeat.cancel()
             await asyncio.gather(self._heartbeat, return_exceptions=True)
+        for ctx, task in list(self.runs.values()):  # waiting for you: leave them waiting, now, not in 15 s
+            if ctx.parked and not task.done():
+                task.cancel()
         if self.background:  # let in-flight runs and memory writes finish their bookkeeping
             _, pending = await asyncio.wait(self.background, timeout=15)
             for task in pending:  # e.g. a run still waiting on an approval

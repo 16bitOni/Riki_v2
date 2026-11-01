@@ -16,7 +16,7 @@ from dotenv import dotenv_values
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_mcp_adapters.tools import load_mcp_tools
 
-from .policy import EXTERNAL, RISKS, SAFE, WRITE
+from .policy import EXTERNAL, RISKS, SAFE, WRITE, moves_money
 from .tools import ToolEntry, unseen_url
 
 log = logging.getLogger(__name__)
@@ -83,7 +83,7 @@ async def load_mcp(path: Path, stack: AsyncExitStack, status: dict | None = None
         for t in tools:
             short = t.name.removeprefix(f"{name}_")
             ask = unseen_url if any(fnmatch.fnmatchcase(short, p) for p in cfg.get("url_tools", [])) else None
-            entries.append(ToolEntry(t, risk_for(cfg, short), f"mcp:{name}", ask_if=ask))
+            entries.append(ToolEntry(t, risk_for(cfg, short), f"mcp:{name}", ask_if=ask, money=moves_money(short)))
         log.info("MCP server %r: %d tools", name, len(tools))
         status[name] = {"ok": True, "tools": len(tools), "error": None}
     return entries

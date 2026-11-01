@@ -99,7 +99,7 @@ async def test_persona_status_logs_approvals_and_heartbeat(make_runtime):
         assert inbox[0]["tool"] == "make_file" and inbox[0]["request"] == "make x" and inbox[0]["risk"] == "write"
         status = (await client.get("/api/status")).json()
         assert status["pending_approvals"] == 1 and len(status["active"]) == 1 and status["db"]["ok"]
-        policy.decide(inbox[0]["id"], True)
+        await policy.decide(rt.db, inbox[0]["id"], True)
         await chat
         assert (await client.get("/api/approvals")).json() == []
         assert (await client.get("/api/approvals?status=decided")).json()[0]["status"] == "approved"

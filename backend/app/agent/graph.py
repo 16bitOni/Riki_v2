@@ -22,7 +22,7 @@ from langgraph.types import RetryPolicy
 from pydantic import BaseModel, Field
 
 from ..tracing import RUN, span
-from .policy import EXTERNAL, SAFE, authorize
+from .policy import ASK, EXTERNAL, SAFE, authorize, record_result
 from .tools import ToolEntry
 
 if TYPE_CHECKING:
@@ -177,7 +177,7 @@ class Agent:
         entry = self.rt.registry.get(name)
         if entry is None or entry.risk == EXTERNAL:  # external tools are never even shown to a model
             return False
-        if name == "connect_app":  # only the agent talking to the user can put a card in front of them
+        if name in ("connect_app", ASK):  # only the agent talking to the user can put a card in front of them
             return depth == 0
         return not (name == "spawn_agent" and depth >= self.limits().max_depth)
 
@@ -271,18 +271,27 @@ class Agent:
                 text = (f"{REPEATED}. Do not repeat it: use its earlier result, change the arguments (to read "
                         "more of a page, pass the start_line it gave), or answer with what you have.")
             else:
-                allowed, reason = await authorize(self.rt.db, risk, name, args, sp["id"], s.approval_timeout_s)
-                if not allowed:
-                    sp["status"], text = "denied", reason
+                decision = await authorize(self.rt.db, risk, name, args, sp["id"], s.approval_timeout_s,
+                                           money=entry.money)
+                if not decision.allowed:
+                    sp["status"], text = "denied", decision.reason
+                elif decision.memo is not None:  # approved and done before a restart: not done twice
+                    sp["meta"]["replayed"] = True
+                    text, ok = decision.memo, True
+                    sp["output"] = text
                 else:
                     try:
                         coro = entry.tool.ainvoke(args)
-                        # sub-agents are bounded by their own step/token limits, not the tool timeout
-                        out = await (coro if name == "spawn_agent" else asyncio.wait_for(coro, s.tool_timeout_s))
+                        # sub-agents are bounded by their own step/token limits, ask_user by how long you take
+                        out = await (coro if name in ("spawn_agent", ASK) else asyncio.wait_for(coro, s.tool_timeout_s))
                         text, ok = as_text(out), True
                         sp["output"] = text
                         if name in ("web_search", "fetch_url") or entry.source == "mcp:browser":
                             ctx.seen += "\n" + text
+                        if name in ("web_search", "fetch_url", "read_file") or entry.source.startswith(("mcp:", "app:")):
+                            ctx.tainted = True  # content nobody here wrote has entered this run
+                        if decision.approval_id:
+                            await record_result(self.rt.db, decision.approval_id, text)
                     except Exception as exc:
                         sp["status"], sp["error"] = "error", f"{type(exc).__name__}: {exc}"[:2000]
                         text = f"Tool error: {sp['error']}"

@@ -32,7 +32,7 @@ from mcp.shared.auth import OAuthClientInformationFull, OAuthClientMetadata, OAu
 from sqlalchemy import select, text
 
 from . import google
-from .agent.policy import EXTERNAL, SAFE, WRITE
+from .agent.policy import EXTERNAL, SAFE, WRITE, moves_money
 from .agent.tools import ToolEntry
 from .db import Connection, utcnow
 from .search import TavilyError, check_key
@@ -270,7 +270,8 @@ class Apps:
                         kept.append((short, "off"))  # read-only: changing tools are never even registered
                         continue
                     self.rt.registry.add(ToolEntry(t, risk, f"app:{row.id}",
-                                                   hub_args_reach_people if app.get("inspect_args") else None))
+                                                   hub_args_reach_people if app.get("inspect_args") else None,
+                                                   money=moves_money(short)))
                     names.append(t.name)
                     kept.append((short, risk))
                 await self.rt.reload_persona()

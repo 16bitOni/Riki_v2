@@ -112,7 +112,7 @@ async def test_write_tool_waits_for_approval_and_respects_denial(make_runtime):
     ctx = RunContext(run_id=new_id())
     task = asyncio.create_task(run_turn(rt, ctx, thread, "make a file"))
     event = await _next_event(ctx, "approval")
-    assert policy.decide(event["approval"]["id"], False)
+    assert await policy.decide(rt.db, event["approval"]["id"], False)
     output = await task
     assert calls == [] and "did not approve" in output
     tool_span = next(s for s in ctx.spans if s["kind"] == "tool")
@@ -124,7 +124,7 @@ async def test_write_tool_waits_for_approval_and_respects_denial(make_runtime):
     ctx = RunContext(run_id=new_id())
     task = asyncio.create_task(run_turn(rt, ctx, thread, "make a file"))
     event = await _next_event(ctx, "approval")
-    policy.decide(event["approval"]["id"], True)
+    await policy.decide(rt.db, event["approval"]["id"], True)
     assert "created" in await task and calls == ["notes.txt"]
 
 
@@ -654,6 +654,8 @@ def test_only_replies_that_can_hold_checkable_claims_are_fact_checked():
 
     looked_up = [{"kind": "tool", "name": "web_search", "status": "ok"}]
     assert worth_checking(looked_up, "sounds rough")  # it looked something up this run
+    assert worth_checking([{"kind": "tool", "name": "web_search", "status": "error"}], "the search timed out")
+    assert worth_checking([], "Two.") and worth_checking([], "there were eleven of them")  # counts written as words
     assert not worth_checking([], "ugh, long day. want to vent or distract?")
     assert worth_checking([], "that's 4 hours from now") and worth_checking([], "see https://example.com")
     assert worth_checking([], "a" * 601)

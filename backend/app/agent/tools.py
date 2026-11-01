@@ -14,11 +14,13 @@ from zoneinfo import ZoneInfo
 
 import httpx
 from langchain_core.tools import BaseTool, tool
+from pydantic import BaseModel, Field
 from riki_memory import MemoryCreate
 
 from .. import search
 from ..db import Artifact, utcnow
-from ..tracing import RUN
+from ..tracing import CURRENT_SPAN, RUN
+from . import policy
 from .policy import EXTERNAL, RISKS, SAFE, WRITE
 
 if TYPE_CHECKING:
@@ -48,6 +50,7 @@ class ToolEntry:
     source: str = "builtin"  # builtin | mcp:<server> | app:<app id>
     reaches_people: Callable[[dict], bool] | None = None  # for hubs: do these arguments act toward someone?
     ask_if: Callable[[dict], bool] | None = None  # safe tools that need approval for some arguments
+    money: bool = False  # spends or moves money: always asks, never granted (policy.moves_money)
 
     def __post_init__(self) -> None:
         assert self.risk in RISKS, self.risk
@@ -57,7 +60,9 @@ class ToolEntry:
     def risk_for(self, args: dict) -> str:
         if self.reaches_people and self.reaches_people(args):
             return EXTERNAL
-        return WRITE if self.risk == SAFE and self.ask_if and self.ask_if(args) else self.risk
+        if self.risk == SAFE and (self.money or (self.ask_if and self.ask_if(args))):
+            return WRITE
+        return self.risk
 
 
 class ToolRegistry:
@@ -162,6 +167,30 @@ async def fetch_text(url: str, max_chars: int = 50_000) -> str:
     raise ValueError("too many redirects")
 
 
+def page_view(head: str, lines: list[str], start_line: int, find: str, budget: int, what: str = "page") -> str:
+    """One part of a long text as numbered lines: from ``start_line``, or only the lines holding all of ``find``'s words.
+    ``head`` is the opening of the bracketed header (the caller adds what it knows: url, age...)."""
+    if find:
+        words = find.lower().split()
+        hits = [f"{i + 1}: {ln}" for i, ln in enumerate(lines) if all(w in ln.lower() for w in words)]
+        shown = _fit(hits, budget)
+        return (f"{head} · {len(hits)} match {find!r}" + (f", first {len(shown)} shown" if len(shown) < len(hits)
+                                                            else "") + "]\n" + "\n".join(shown)
+                + "\n[read around a match with start_line=<its number>]")
+    first = max(start_line, 1)
+    if first > len(lines):
+        return f"{head}; start_line {first} is past the end]"
+    shown = _fit([f"{i + 1}: {lines[i]}" for i in range(first - 1, len(lines))], budget)
+    end = first - 1 + len(shown)
+    return (f"{head} · showing {first}-{end}]\n" + "\n".join(shown)
+            + (f"\n[more: start_line={end + 1}, or find=\"words\" to search the {what}]" if end < len(lines)
+               else f"\n[end of {what}]"))
+
+
+def wrap_lines(text: str, width: int = 300) -> list[str]:
+    return [w for ln in text.splitlines() for w in textwrap.wrap(ln, width)]
+
+
 def _fit(lines: list[str], budget: int) -> list[str]:
     """As many lines as fit in ``budget`` characters, at least one."""
     out, used = [], 0
@@ -220,7 +249,7 @@ def builtin_tools(rt: "Runtime") -> list[ToolEntry]:
         only the lines that contain all of them, with their numbers."""
         at, lines = pages.get(url, (None, []))
         if at is None or time.monotonic() - at > PAGE_TTL_S:  # monotonic starts near 0 at boot: never compare to 0
-            lines = [w for ln in (await fetch_text(url)).splitlines() for w in textwrap.wrap(ln, 300)]
+            lines = wrap_lines(await fetch_text(url))
             at = time.monotonic()
             pages[url] = (at, lines)
             while len(pages) > 32:
@@ -229,21 +258,19 @@ def builtin_tools(rt: "Runtime") -> list[ToolEntry]:
             return f"[{url}] has no readable text (it may need JavaScript to show its content)."
         head = f"[{url} · fetched {int(time.monotonic() - at)}s ago · {len(lines)} lines"
         budget = max(s.tool_output_chars - 300, 300)  # room for the notes, so the generic truncation never fires
-        if find:
-            words = find.lower().split()
-            hits = [f"{i + 1}: {ln}" for i, ln in enumerate(lines) if all(w in ln.lower() for w in words)]
-            shown = _fit(hits, budget)
-            return (f"{head} · {len(hits)} match {find!r}" + (f", first {len(shown)} shown" if len(shown) < len(hits)
-                                                                else "") + "]\n" + "\n".join(shown)
-                    + "\n[read around a match with start_line=<its number>]")
-        first = max(start_line, 1)
-        if first > len(lines):
-            return f"{head}; start_line {first} is past the end]"
-        shown = _fit([f"{i + 1}: {lines[i]}" for i in range(first - 1, len(lines))], budget)
-        end = first - 1 + len(shown)
-        return (f"{head} · showing {first}-{end}]\n" + "\n".join(shown)
-                + (f"\n[more: start_line={end + 1}, or find=\"words\" to search the page]" if end < len(lines)
-                   else "\n[end of page]"))
+        return page_view(head, lines, start_line, find, budget)
+
+    class AskArgs(BaseModel):
+        question: str = Field(max_length=300)
+        options: list[str] = Field(min_length=2, max_length=4, description="2-4 short answers the user can tap.")
+
+    @tool(args_schema=AskArgs)
+    async def ask_user(question: str, options: list[str]) -> str:
+        """Ask the user ONE question with 2-4 tappable choices. Use it only when a wrong guess would be expensive or
+        could not be undone (money, a booking, deleting, a date that matters). For anything cheap, state your assumption
+        and carry on. It waits for the answer, which can take hours; never ask something you could look up."""
+        return await policy.ask(rt.db, question, [o[:60] for o in options], CURRENT_SPAN.get() or "",
+                                s.approval_timeout_s)
 
     @tool
     async def recall_memory(query: str) -> str:
@@ -297,7 +324,9 @@ def builtin_tools(rt: "Runtime") -> list[ToolEntry]:
 
     return [
         ToolEntry(current_time, SAFE), ToolEntry(web_search, SAFE), ToolEntry(fetch_url, SAFE, ask_if=unseen_url),
-        ToolEntry(recall_memory, SAFE), ToolEntry(remember, SAFE), ToolEntry(connect_app, SAFE),
+        ToolEntry(recall_memory, SAFE), ToolEntry(connect_app, SAFE), ToolEntry(ask_user, SAFE),
+        # a run that has read the web, a file or an app may have been told what to "remember": that needs your yes
+        ToolEntry(remember, SAFE, ask_if=lambda _: RUN.get().tainted),
         ToolEntry(save_markdown, SAFE), ToolEntry(save_artifact, SAFE),  # write only Riki's own file store
     ]
 

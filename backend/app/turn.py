@@ -12,6 +12,8 @@ from sqlalchemy import select, update
 
 from .agent.graph import AgentSpec, as_text
 from .agent.prompts import VERIFY
+from .cognition import reflection_block
+from .spend import budget_state
 from .checks import (NOT_EVIDENCE, citation_check, drop_found, evidence, grounding_input, is_source, parse_unsupported,
                      worth_checking)
 from .db import Message, Run, Span, Thread, new_id, utcnow
@@ -79,9 +81,14 @@ async def core_context(rt: Runtime, user: str) -> str:
     try:
         blocks = await asyncio.wait_for(rt.memory.get_blocks(user), 2)
     except Exception:
-        return ""
+        blocks = {}
     lines = [f"{label}:\n" + "\n".join(f"- {t}" for t in texts) for label, texts in (blocks or {}).items() if texts]
-    return f"## About {rt.settings.user_name} (core memory)\n" + "\n".join(lines)[:1500] if lines else ""
+    core = f"## About {rt.settings.user_name} (core memory)\n" + "\n".join(lines)[:1500] if lines else ""
+    try:
+        read = await reflection_block(rt)
+    except Exception:
+        read = ""
+    return "\n\n".join(x for x in (core, read) if x)
 
 
 async def _sources(rt: Runtime, ctx: RunContext, thread_id: str) -> list[dict]:
@@ -120,13 +127,39 @@ async def check_grounding(rt: Runtime, ctx: RunContext, thread_id: str, question
         log.exception("grounding check failed for run %s; the reply goes out unchecked", ctx.run_id)
         return []
 
+async def _lineage(rt: Runtime, run_id: str) -> list[str]:
+    """The run this one continues, and the one before it (a request can survive more than one restart)."""
+    chain = []
+    async with rt.db.session() as s:
+        while run_id and len(chain) < 5:
+            chain.append(run_id)
+            run_id = await s.scalar(select(Run.resume_of).where(Run.id == run_id))
+    return chain
+
+
+async def _left_waiting(rt: Runtime, ctx: RunContext) -> bool:
+    """Cancelled because Riki is shutting down while this run waited for your OK (as opposed to Stop)? The run's own
+    row says so: policy marks it 'waiting' before it waits and leaves it that way on shutdown."""
+    from .agent import policy
+
+    if ctx.left_waiting:
+        return True
+    if not policy.SHUTTING_DOWN:
+        return False
+    try:
+        async with rt.db.session() as s:
+            return await s.scalar(select(Run.status).where(Run.id == ctx.run_id)) == "waiting"
+    except Exception:
+        return False
+
+
 def start_run(rt: Runtime, thread_id: str, text: str, *, source: str = "chat", learn: bool = True,
-              images: list[str] | None = None, effort: str | None = None) -> RunContext:
+              images: list[str] | None = None, effort: str | None = None, resume_of: str | None = None) -> RunContext:
     """Start one run in the background and register it, so any client can follow it (also after navigating
     away or refreshing), stop it, or be told it is busy. Finished runs stay followable for two minutes."""
     ctx = RunContext(run_id=new_id(), source=source, thread_id=thread_id,
                      effort=effort or rt.settings.default_effort)
-    task = rt.spawn(run_turn(rt, ctx, thread_id, text, learn=learn, images=images))
+    task = rt.spawn(run_turn(rt, ctx, thread_id, text, learn=learn, images=images, resume_of=resume_of))
     rt.runs[ctx.run_id] = (ctx, task)
     task.add_done_callback(lambda _: asyncio.get_running_loop().call_later(120, rt.runs.pop, ctx.run_id, None))
     return ctx
@@ -145,7 +178,7 @@ async def _save(rt: Runtime, ctx: RunContext, thread_id: str, output: str, statu
 
 
 async def run_turn(rt: Runtime, ctx: RunContext, thread_id: str, text: str, *, learn: bool = True,
-                   images: list[str] | None = None) -> str:
+                   images: list[str] | None = None, resume_of: str | None = None) -> str:
     """Must run with RUN set to ``ctx`` (call inside its own task). Never raises; errors land in the run."""
     s = rt.settings
     ctx.memory_user = memory_user = ctx.memory_user or s.user_id
@@ -155,10 +188,18 @@ async def run_turn(rt: Runtime, ctx: RunContext, thread_id: str, text: str, *, l
     text = clean(text)
     ctx.seen = text
     history = await _history(rt, thread_id)
+    over_budget = ctx.source == "chat" and await budget_state(rt) == "hard"
+    if over_budget:
+        ctx.effort = "low"
+    if resume_of:  # continuing a request that was waiting for you when Riki restarted: your message is already in the chat
+        ctx.lineage = await _lineage(rt, resume_of)
+        if history and isinstance(history[-1], HumanMessage) and history[-1].content.startswith(text):
+            history = history[:-1]
     async with rt.db.session() as db:
         db.add(Run(id=ctx.run_id, thread_id=thread_id, source=ctx.source, input=text, model=s.model,
-                   prompt_version=rt.prompt_version))
-        db.add(Message(thread_id=thread_id, role="user", content=text, images=images or None, run_id=ctx.run_id))
+                   prompt_version=rt.prompt_version, effort=ctx.effort, resume_of=resume_of))
+        if not resume_of:
+            db.add(Message(thread_id=thread_id, role="user", content=text, images=images or None, run_id=ctx.run_id))
         thread = await db.get(Thread, thread_id)
         if thread and thread.kind == "side" and len(thread.title.split()) < 3 and len(text.split()) >= 3:
             thread.title = title_for(text)  # "hi" is not a title; the first real message is
@@ -183,6 +224,8 @@ async def run_turn(rt: Runtime, ctx: RunContext, thread_id: str, text: str, *, l
                         s.memory_timeout_s)
                     memory_text = with_ids(memory_text, known)
                     sp["output"] = memory_text
+                read = await reflection_block(rt)
+                memory_text = f"{read}\n\n{memory_text}" if read else memory_text
             except TimeoutError:  # the model still has recall_memory if it needs it
                 log.warning("memory recall took over %ss; answering without it", s.memory_timeout_s)
             except Exception:
@@ -204,6 +247,9 @@ async def run_turn(rt: Runtime, ctx: RunContext, thread_id: str, text: str, *, l
         task = asyncio.current_task()
         if task is not None:
             task.uncancel()
+        if await _left_waiting(rt, ctx):  # shut down while waiting for you: no verdict, the next start continues it
+            rt.active.pop(ctx.run_id, None)
+            return ""
     except Exception as exc:
         log.exception("run %s failed", ctx.run_id)
         status, error = "error", f"{type(exc).__name__}: {exc}"
@@ -215,6 +261,9 @@ async def run_turn(rt: Runtime, ctx: RunContext, thread_id: str, text: str, *, l
         if "[secret removed]" in text:  # said by the code, not left to the model: it must never look accepted
             output = f"The key you pasted was removed and not saved. Use the connect card or the Apps tab.\n\n{output}"
         # unsupported claims are not written into the reply: they are on the run (checks) and the UI marks the reply
+        if over_budget and status == "ok" and getattr(rt, "budget_notice_day", None) != utcnow().date():
+            rt.budget_notice_day = utcnow().date()
+            output = "(Today's budget is used up, so I'm answering briefly.)\n\n" + output
         output = scrub(clean(output), "[secret removed]")
         latency = int((time.perf_counter() - started) * 1000)
         checks = citation_check(output, ctx.spans) | ({} if unsupported is None else {"unsupported": unsupported})
@@ -237,5 +286,7 @@ async def run_turn(rt: Runtime, ctx: RunContext, thread_id: str, text: str, *, l
                  tokens_in=ctx.tokens_in, tokens_out=ctx.tokens_out, tokens_cached=ctx.tokens_cached,
                  cost_usd=cost, checks=checks, finished_at=utcnow().isoformat())
     if learn and status == "ok":
-        rt.spawn(rt.memory.remember(memory_user, text, output, known=known, turn_key=f"{thread_id}/{ctx.run_id}"))
+        # a run that read the web, a file or an app learns from what you said, not from the reply built on that content
+        rt.spawn(rt.memory.remember(memory_user, text, "" if ctx.tainted else output, known=known,
+                                    turn_key=f"{thread_id}/{ctx.run_id}"))
     return output

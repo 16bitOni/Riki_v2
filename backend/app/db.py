@@ -27,6 +27,7 @@ class Thread(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     title: Mapped[str] = mapped_column(String(200), default="New chat")
     kind: Mapped[str] = mapped_column(String(16), default="side", server_default="side")  # main|side|heartbeat
+    lessons_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # when lessons were last drawn from this chat
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -62,8 +63,10 @@ class Run(Base):
     __tablename__ = "runs"
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     thread_id: Mapped[str | None] = mapped_column(ForeignKey("threads.id", ondelete="SET NULL"), index=True)
-    source: Mapped[str] = mapped_column(String(16), default="chat")  # chat | eval
-    status: Mapped[str] = mapped_column(String(16), default="running")  # running | ok | error
+    source: Mapped[str] = mapped_column(String(16), default="chat")  # chat | eval | heartbeat | schedule | cognition | lessons
+    effort: Mapped[str | None] = mapped_column(String(8))  # low | medium | high, kept so a resumed run gets the same limits
+    resume_of: Mapped[str | None] = mapped_column(String(32))  # the run that was waiting for you when Riki restarted
+    status: Mapped[str] = mapped_column(String(16), default="running")  # running | waiting (for you) | ok | error | stopped
     input: Mapped[str] = mapped_column(Text)
     output: Mapped[str | None] = mapped_column(Text)
     error: Mapped[str | None] = mapped_column(Text)
@@ -110,6 +113,66 @@ class Approval(Base):
     status: Mapped[str] = mapped_column(String(16), default="pending")  # pending|approved|denied|expired
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # What makes an approval outlive a run: the same request after a restart finds this row instead of asking again.
+    thread_id: Mapped[str | None] = mapped_column(String(32), index=True)
+    args_hash: Mapped[str | None] = mapped_column(String(64))
+    money: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())  # moves money: never granted
+    via: Mapped[str] = mapped_column(String(8), default="user", server_default="user")  # user | grant
+    result: Mapped[str | None] = mapped_column(Text)  # what the action returned (so it never runs twice), or ask_user's answer
+    executed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ApprovalGrant(Base):
+    """"Allow this tool for 30 minutes in this chat": saves tapping through a 20-step job. Never for money or people."""
+
+    __tablename__ = "approval_grants"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    thread_id: Mapped[str] = mapped_column(String(32), index=True)
+    tool: Mapped[str] = mapped_column(String(200))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Reflection(Base):
+    """Riki's living read on you. Each version is kept; the newest is injected into prompts and shown in Memory."""
+
+    __tablename__ = "reflections"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    content: Mapped[str] = mapped_column(Text)
+    monologue: Mapped[str] = mapped_column(Text, default="", server_default="")  # private thoughts of that thinking cycle
+    memory_count: Mapped[int] = mapped_column(Integer, default=0)
+    source: Mapped[str] = mapped_column(String(8), default="auto")  # auto | cycle | edit (an edit is ground truth)
+    run_id: Mapped[str | None] = mapped_column(String(32))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
+class Schedule(Base):
+    """A reminder (just tells you) or a task (a read-only run whose result tells you), once or repeating."""
+
+    __tablename__ = "schedules"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    kind: Mapped[str] = mapped_column(String(8))  # remind | task
+    text: Mapped[str] = mapped_column(Text)
+    next_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    repeat: Mapped[str] = mapped_column(String(10), default="none")  # none | daily | weekdays | weekly
+    status: Mapped[str] = mapped_column(String(10), default="active")  # active | done | cancelled
+    last_run_id: Mapped[str | None] = mapped_column(String(32))
+    last_fired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Nudge(Base):
+    """A message Riki sent on its own initiative, with how you reacted (this is what teaches it when to stay quiet)."""
+
+    __tablename__ = "nudges"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    topic: Mapped[str] = mapped_column(String(120))
+    text: Mapped[str] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(String(12), default="open_loop")
+    run_id: Mapped[str | None] = mapped_column(String(32))  # the thinking cycle behind it: "why did you message me?"
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    reaction: Mapped[str | None] = mapped_column(String(8))  # replied | ignored (set later)
 
 
 class Feedback(Base):

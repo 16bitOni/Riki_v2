@@ -71,16 +71,31 @@ class Settings(BaseSettings):
     tool_output_chars: int = 6_000  # what the model sees; the trace keeps more
     history_turns: int = 40  # most turns of this chat sent to the model...
     history_chars: int = Field(16_000, ge=1_000)  # ...cut from the oldest end past this many characters (4 turns always stay)
-    approval_timeout_s: int = 300
+    approval_timeout_s: int = 24 * 3600  # how long a change waits for your OK (it survives a restart; see policy.py)
     # Memory before the model answers: "heuristic" plans the search with regex (no extra model call; the model can
     # still call recall_memory itself), "escalate" asks a planner model when that finds nothing, "llm" always does.
     memory_planner: Literal["heuristic", "escalate", "llm"] = "heuristic"
     memory_timeout_s: float = 8  # a slow memory lookup must never hold the answer back
 
     core_tools: list[str] = ["current_time", "recall_memory", "remember", "web_search", "fetch_url",
-                             "spawn_agent", "load_tools", "connect_app",
+                             "spawn_agent", "load_tools", "connect_app", "ask_user", "read_file", "schedule",
                              "save_markdown", "save_artifact"]
     mcp_config: Path = BACKEND_DIR / "mcp.json"
+
+    # Telegram: talk to Riki and approve things from your phone. Long polling, so no public address is needed.
+    # Only this one chat is ever answered or messaged; get the id by writing to the bot once (it is logged).
+    telegram_token: SecretStr | None = None
+    telegram_chat_id: int | None = None
+
+    # Riki thinking between chats (reflection, lessons, nudges). Background work pauses when the day's budget is 80% used.
+    cognition: bool = True
+    cognition_interval_h: float = Field(4, gt=0)
+    daily_budget_usd: float | None = Field(None, gt=0)  # none = no cap; needs RIKI_PRICES to count anything
+
+    # run_python: a throwaway Docker container with no network and a read-only disk. Off unless you switch it on.
+    sandbox: bool = False
+    sandbox_image: str = "python:3.12-slim"
+    upload_max_mb: int = Field(15, ge=1, le=100)
 
     def for_effort(self, effort: str) -> "Settings":
         """These settings with an effort level's caps applied; never raises a limit above what is configured."""
