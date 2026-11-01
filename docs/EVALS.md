@@ -90,3 +90,10 @@ Each row is a full run of `uv run python -m evals.run --repeat N`. Compare a cha
 | Date | Commit | Model | Prompt | Result | Notes |
 |---|---|---|---|---|---|
 | 2026-10-31 | `f171c7f` | claude-haiku-4-5 | 1d7c178e7e80 | 16/21 at pass^5 (about 91% of single tries) | The base for Phase 1. Failing: web-grounded (2/5), count-from-source (3/5), setup-scan-read-only (3/5), greeting (4/5), knows-it-already (4/5). The last two are judge noise. |
+
+## Voice cases
+
+The eight `voice-*` cases in `cases.json` come from the register table in v1's persona (tired, bombed an interview,
+feeling low, thanks...). They grade the voice the default persona asks for (dry, playful, direct, lowercase energy), so
+run them with that persona set in Settings; with a different persona they will measure the wrong thing. They also set the
+bar for the "Not verified" marker: it appears under a reply in the UI instead of inside the text.

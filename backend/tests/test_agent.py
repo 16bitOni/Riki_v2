@@ -263,7 +263,7 @@ async def test_token_budget_stops_the_loop(make_runtime):
     rt = await make_runtime(respond, run_token_budget=1_000)
     ctx, output = await run(rt, "loop forever")
     assert "token budget" in output
-    assert ctx.tokens_in + ctx.tokens_out >= 1_000
+    assert ctx.tokens_in + ctx.tokens_out >= 850  # agents land at 85% of the budget
 
 
 async def test_repeated_identical_tool_call_is_refused(make_runtime):
@@ -376,7 +376,7 @@ async def test_claims_missing_from_the_evidence_are_flagged_in_the_reply(make_ru
     rt = await make_runtime(respond, verify=verify, extra_tools=[ToolEntry(rfs, "safe")], core_tools=["rfs"])
     ctx, output = await run(rt, "list the winter 2027 requests")
     assert "[t1] Winter 2027: Own Your Intelligence" in checked[0]  # the checker saw the tool's evidence
-    assert output.endswith("**Not verified:** I couldn't find these in what I read: AI for Energy; 3 requests in total")
+    assert "Not verified" not in output  # not written into the reply; the run carries it and the UI marks the reply
     async with rt.db.session() as s:
         assert (await s.get(Run, ctx.run_id)).checks["unsupported"] == ["AI for Energy", "3 requests in total"]
 
@@ -647,3 +647,13 @@ async def test_prompt_text_is_kept_for_its_version_and_connected_apps_are_named(
     connected, missing = re.search(r"Connected and ready to use[^:]*: (.*)\. Not connected yet: (.*)\.",
                                    rt.main_system).groups()
     assert connected == "gmail" and "gmail" not in missing.split(", ")
+
+
+def test_only_replies_that_can_hold_checkable_claims_are_fact_checked():
+    from app.checks import worth_checking
+
+    looked_up = [{"kind": "tool", "name": "web_search", "status": "ok"}]
+    assert worth_checking(looked_up, "sounds rough")  # it looked something up this run
+    assert not worth_checking([], "ugh, long day. want to vent or distract?")
+    assert worth_checking([], "that's 4 hours from now") and worth_checking([], "see https://example.com")
+    assert worth_checking([], "a" * 601)

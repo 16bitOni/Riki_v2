@@ -12,7 +12,8 @@ from sqlalchemy import select, update
 
 from .agent.graph import AgentSpec, as_text
 from .agent.prompts import VERIFY
-from .checks import NOT_EVIDENCE, citation_check, drop_found, evidence, grounding_input, is_source, parse_unsupported
+from .checks import (NOT_EVIDENCE, citation_check, drop_found, evidence, grounding_input, is_source, parse_unsupported,
+                     worth_checking)
 from .db import Message, Run, Span, Thread, new_id, utcnow
 from .runtime import Runtime
 from .tracing import RUN, RunContext, clean, run_cost, scrub, span
@@ -101,11 +102,12 @@ async def check_grounding(rt: Runtime, ctx: RunContext, thread_id: str, question
     """Claims in the reply that its evidence does not back. One model call; never raises."""
     try:
         proof = evidence(await _sources(rt, ctx, thread_id)) or "(none: nothing was looked up)"
-        async with span("llm", rt.model_names["fast"],
+        # the stronger model: a model checking its own reply is a weak check, and it runs only when worth_checking says so
+        async with span("llm", rt.model_names["smart"],
                         input={"purpose": "grounding check", "evidence_chars": len(proof)}) as sp:
             now = datetime.now(ZoneInfo(rt.settings.timezone)).strftime("%A %d %B %Y, %H:%M %Z")
             apps = [a for a, st in rt.apps.state.items() if st.get("state") == "connected"]
-            msg = await asyncio.wait_for(rt.models["fast"].ainvoke([SystemMessage(VERIFY), HumanMessage(
+            msg = await asyncio.wait_for(rt.models["smart"].ainvoke([SystemMessage(VERIFY), HumanMessage(
                 grounding_input(question, proof, reply, now=now, spans=ctx.spans, apps=apps))]),
                 rt.settings.tool_timeout_s)
             usage = msg.usage_metadata or {}
@@ -192,7 +194,7 @@ async def run_turn(rt: Runtime, ctx: RunContext, thread_id: str, text: str, *, l
         output = await asyncio.wait_for(
             rt.agent.run(AgentSpec(rt.persona.name, rt.main_system, "fast", 0), [*history, message],
                          [] if small else list(s.core_tools)), s.run_timeout_s)
-        if not small:
+        if not small and worth_checking(ctx.spans, output):
             unsupported = await check_grounding(rt, ctx, thread_id, text, output)
     except TimeoutError:
         status, error = "error", f"run timed out after {s.run_timeout_s:g}s"
@@ -212,8 +214,7 @@ async def run_turn(rt: Runtime, ctx: RunContext, thread_id: str, text: str, *, l
         rt.active.pop(ctx.run_id, None)
         if "[secret removed]" in text:  # said by the code, not left to the model: it must never look accepted
             output = f"The key you pasted was removed and not saved. Use the connect card or the Apps tab.\n\n{output}"
-        if unsupported:  # said by the code, so a made-up detail can never pass as checked
-            output += "\n\n> ⚠️ **Not verified:** I couldn't find these in what I read: " + "; ".join(unsupported)
+        # unsupported claims are not written into the reply: they are on the run (checks) and the UI marks the reply
         output = scrub(clean(output), "[secret removed]")
         latency = int((time.perf_counter() - started) * 1000)
         checks = citation_check(output, ctx.spans) | ({} if unsupported is None else {"unsupported": unsupported})

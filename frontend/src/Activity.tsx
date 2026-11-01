@@ -226,6 +226,12 @@ export function RunDrawer(props: {
           This reply cites {bad.join(", ")}, but no step produced that. Treat those claims as unverified.
         </p>
       )}
+      {!!run?.checks?.unsupported?.length && (
+        <div className="notice error">
+          Not found in what Riki read:
+          <ul>{run.checks.unsupported.map((c) => <li key={c}>{c}</li>)}</ul>
+        </div>
+      )}
       {run?.error && <p className="notice error">{run.error}</p>}
       <TraceTree spans={props.spans} approvals={props.approvals} focus={props.focus} />
     </aside>

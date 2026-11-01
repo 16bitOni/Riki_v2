@@ -39,6 +39,7 @@ export type Msg = {
   run_id?: string | null;
   feedback?: number | null;
   error?: string | null; // why the run failed, if it did
+  checks?: { unsupported?: string[]; invalid_citations?: string[] }; // fact check of the reply
   created_at?: string;
 };
 

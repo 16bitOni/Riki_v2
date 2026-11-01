@@ -32,6 +32,8 @@ if TYPE_CHECKING:
 AGENT_DEPTH: ContextVar[int] = ContextVar("riki_depth", default=0)
 NOT_LOADED = "is not available to you"
 CLEARED = "cleared from context to save tokens"
+# An agent that lands at 85% of the budget has room for its last answer; at 100% the last answer would overshoot.
+LANDING_AT = 0.85
 BUDGET_NOTE = "I stopped here: this request reached its token budget. Ask me to continue if it is worth more."
 REPEATED = "You already made this exact call"
 SUB_AGENT_BASE_TOOLS = ["current_time", "recall_memory", "load_tools"]
@@ -147,7 +149,7 @@ class Agent:
                 return "Refused: maximum agent depth reached. Do this step yourself."
             if ctx.agents_spawned >= s.max_agents_per_run:
                 return "Refused: the sub-agent budget for this request is used up. Finish with what you have."
-            if ctx.tokens_in + ctx.tokens_out >= s.run_token_budget:  # no new fan-out once the money is gone
+            if ctx.tokens_in + ctx.tokens_out >= s.run_token_budget * LANDING_AT:  # no new fan-out once the money is nearly gone
                 return "Refused: the token budget for this request is used up. Finish with what you have."
             ctx.agents_spawned += 1
             base = SUB_AGENT_BASE_TOOLS + (["spawn_agent"] if depth < s.max_depth else [])
@@ -184,10 +186,10 @@ class Agent:
     async def _call_model(self, state: AgentState, config) -> dict:
         spec: AgentSpec = config["configurable"]["spec"]
         ctx, s = RUN.get(), self.limits()
-        over = ctx.tokens_in + ctx.tokens_out >= s.run_token_budget
+        over = ctx.tokens_in + ctx.tokens_out >= s.run_token_budget * LANDING_AT
         # Out of tokens with something gathered: one last call with no tools turns it into an answer instead of an
         # apology (a request that spent its budget researching used to end with nothing at all).
-        # shortcut: that call may overshoot the budget by one answer; every agent of the run gets one.
+        # It starts at 85% of the budget so the answers fit under the cap. shortcut: parallel agents each get one call.
         landed = any(m.additional_kwargs.get("landed") for m in state["messages"] if isinstance(m, AIMessage))
         if over and (landed or not any(isinstance(m, ToolMessage) for m in state["messages"])):
             return {"messages": [AIMessage(BUDGET_NOTE)]}

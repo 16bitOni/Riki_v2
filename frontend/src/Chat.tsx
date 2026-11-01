@@ -236,7 +236,7 @@ export function Chat(props: {
       setMessages((m) => [
         ...m.slice(0, -2),
         ...(m.length > 1 ? [{ ...m[m.length - 2], run_id: m[m.length - 2].run_id ?? e.run_id }] : []),
-        { ...m[m.length - 1], content: e.output, run_id: e.run_id, steps: l.spans, latency_ms: e.latency_ms, error: e.error },
+        { ...m[m.length - 1], content: e.output, run_id: e.run_id, steps: l.spans, latency_ms: e.latency_ms, error: e.error, checks: e.checks },
       ]);
       // a drawer opened mid-run keeps the final trace instead of going blank
       setDetail((d) =>
@@ -494,6 +494,11 @@ export function Chat(props: {
                   {!isLive && m.run_id && (
                     <div className="msg-foot">
                       <Steps spans={m.steps || []} latency={m.latency_ms} onDetails={() => openDetail(m.run_id!)} />
+                      {!!m.checks?.unsupported?.length && (
+                        <button className="link small unverified" onClick={() => openDetail(m.run_id!)}>
+                          {m.checks.unsupported.length} {m.checks.unsupported.length === 1 ? "claim" : "claims"} not verified ›
+                        </button>
+                      )}
                       <div className="msg-actions">
                         <button
                           className="icon small"

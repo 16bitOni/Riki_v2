@@ -165,7 +165,7 @@ async def main(argv: list[str] | None = None) -> int:
                   f"{sum(t['tokens'] for t in tries) // len(tries)} tok")
             for t in tries:
                 for f in t["fails"]:
-                    print(f"     - {f}")
+                    print(f"     - {f}  (run {t['run_id']})")
 
         async with rt.db.session() as s:
             # baseline: the last run of the same model on the same cases; another model or a --case subset is no

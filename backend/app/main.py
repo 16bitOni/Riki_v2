@@ -532,7 +532,7 @@ async def thread_messages(thread_id: HexId, rt: Auth):
         run_ids = [m.run_id for m in rows if m.run_id and m.role == "assistant"]
         scores = dict((await s.execute(select(Feedback.run_id, Feedback.score).where(
             Feedback.run_id.in_(run_ids)))).all())
-        runs_ = {r.id: r for r in (await s.execute(select(Run.id, Run.latency_ms, Run.error).where(Run.id.in_(run_ids)))).all()}
+        runs_ = {r.id: r for r in (await s.execute(select(Run.id, Run.latency_ms, Run.error, Run.checks).where(Run.id.in_(run_ids)))).all()}
         steps: dict[str, list] = {}
         for sp in (await s.scalars(select(Span).where(Span.run_id.in_(run_ids), Span.kind != "llm")
                                    .order_by(Span.started_at))).all():
@@ -544,7 +544,8 @@ async def thread_messages(thread_id: HexId, rt: Auth):
     return [{"id": m.id, "role": m.role, "content": m.content, "images": m.images or [], "run_id": m.run_id,
              "feedback": scores.get(m.run_id) if m.role == "assistant" else None, "created_at": m.created_at,
              **({"steps": steps.get(m.run_id, []), "latency_ms": getattr(runs_.get(m.run_id), "latency_ms", None),
-                 "error": getattr(runs_.get(m.run_id), "error", None)}
+                 "error": getattr(runs_.get(m.run_id), "error", None),
+                 "checks": getattr(runs_.get(m.run_id), "checks", None) or {}}
                 if m.role == "assistant" else {})}
             for m in rows[-200:]]
 

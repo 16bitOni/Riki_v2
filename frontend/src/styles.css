@@ -728,3 +728,6 @@ code.copy { display: block; padding: 10px 12px; border-radius: 10px; background:
 .fact-picks input { margin-top: 4px; }
 .onboard-skip { margin-top: 4px; }
 @media (max-width: 640px) { .onboard h1 { --fs: 28; } .onboard-apps { grid-template-columns: 1fr; } }
+
+button.link.unverified { color: var(--warn); }
+button.link.unverified:hover { color: var(--snow); }
