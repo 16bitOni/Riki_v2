@@ -1,16 +1,22 @@
 """Telegram: talk to Riki, approve changes and answer its questions from your phone.
 
-Long polling, so Riki needs no public address and stays on localhost. It answers and messages exactly ONE chat
-(RIKI_TELEGRAM_CHAT_ID); everyone else is ignored. The recipient is fixed in config, never chosen by the model, which is
-what keeps "Riki never contacts other people" true here too. Your phone and the app share one conversation: the main chat.
+Long polling, so Riki needs no public address and stays on localhost. It answers and messages exactly ONE chat; everyone
+else is ignored. The recipient is fixed when you pair, never chosen by the model, which is what keeps "Riki never contacts
+other people" true here too. Your phone and the app share one conversation: the permanent Telegram chat in the app.
+
+Connecting from the app: you paste the bot's token (stored encrypted), the app shows a one-time code and a link, and the first
+private chat that sends that code becomes the one chat. The code lives ten minutes, in memory only, and five wrong guesses
+lock it until you ask for a new one. Until a chat is paired, every message is ignored without an answer.
 """
 
 import asyncio
 import base64
+import hmac
 import html
 import json
 import logging
 import re
+import secrets
 import time
 from typing import TYPE_CHECKING
 
@@ -28,6 +34,21 @@ LIMIT = 4096  # characters per Telegram message
 POLL_S = 25
 EDIT_EVERY_S = 1.2  # a streamed reply is one message edited at most this often (Telegram rate-limits edits)
 MAX_PHOTO_BYTES = 3_000_000
+PAIR_TTL_S = 600
+PAIR_MAX_FAILS = 5
+
+
+async def bot_info(token: str) -> dict:
+    """Ask Telegram who this token belongs to; a readable ValueError when it is wrong or Telegram is unreachable."""
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.post(f"https://api.telegram.org/bot{token}/getMe")
+            data = r.json()
+    except (httpx.HTTPError, ValueError):
+        raise ValueError("Could not reach Telegram. Check the internet connection and try again.")
+    if not data.get("ok"):
+        raise ValueError("Telegram does not recognise that token. Copy it again from @BotFather.")
+    return data["result"]
 
 
 def md_to_html(text: str) -> str:
@@ -86,8 +107,11 @@ def approval_text(approval: dict, agent: str) -> str:
 
 
 class TelegramChannel:
-    def __init__(self, rt: "Runtime", token: str, chat_id: int) -> None:
-        self.rt, self.chat_id = rt, chat_id
+    def __init__(self, rt: "Runtime", token: str, chat_id: int | None, bot: str = "", who: str = "") -> None:
+        self.rt, self.chat_id, self.bot, self.who = rt, chat_id, bot, who
+        self.code: str | None = None  # the pairing code, while no chat is paired
+        self.code_until = 0.0
+        self.failures = 0
         self.api = f"https://api.telegram.org/bot{token}"
         self.file_api = f"https://api.telegram.org/file/bot{token}"
         self.client = httpx.AsyncClient(timeout=POLL_S + 15)
@@ -106,6 +130,8 @@ class TelegramChannel:
 
     async def _send(self, text: str, keyboard: list | None = None, plain: bool = False) -> int | None:
         sent = None
+        if self.chat_id is None:
+            raise RuntimeError("no Telegram chat is paired yet")
         for i, part in enumerate(split_message(text)):
             params = {"chat_id": self.chat_id, "text": part if plain else md_to_html(part), "link_preview_options": {"is_disabled": True}}
             if not plain:
@@ -125,11 +151,65 @@ class TelegramChannel:
 
     async def on_approval(self, approval: dict) -> None:
         """A request is waiting (from any chat): put the buttons on your phone."""
+        if self.chat_id is None:
+            return
         await self._send(approval_text(approval, self.rt.persona.name), approval_keyboard(approval), plain=True)
 
     # -- lifecycle --------------------------------------------------------------------------------------
 
+    # -- pairing ----------------------------------------------------------------------------------------
+
+    def new_code(self) -> str:
+        self.code, self.code_until, self.failures = secrets.token_hex(5), time.time() + PAIR_TTL_S, 0
+        return self.code
+
+    def unpair(self) -> None:
+        """Forget the paired chat (keeps the bot); a new code starts a new pairing."""
+        self.chat_id, self.who = None, ""
+        self.new_code()
+
+    def status(self) -> dict:
+        pairing = self.chat_id is None
+        live = pairing and self.code is not None and time.time() < self.code_until
+        locked = pairing and self.failures >= PAIR_MAX_FAILS
+        return {"connected": True, "paired": not pairing, "bot": self.bot, "who": self.who, "error": self.last_error,
+                "code": self.code if live and not locked else None,
+                "link": f"https://t.me/{self.bot}?start={self.code}" if live and not locked and self.bot else None,
+                "expires_in": max(0, int(self.code_until - time.time())) if live else 0, "locked": locked}
+
+    async def _pair(self, msg: dict) -> None:
+        """Before any chat is paired the only thing that is read is a private message holding the code."""
+        chat = msg["chat"]
+        guess = (msg.get("text") or "").strip().removeprefix("/start").strip().lower()
+        if chat.get("type") != "private" or not guess or self.code is None or time.time() > self.code_until \
+                or self.failures >= PAIR_MAX_FAILS:
+            return
+        if not hmac.compare_digest(guess.encode(), self.code.encode()):
+            self.failures += 1
+            log.warning("telegram: wrong pairing code from chat %s (%s of %s)", chat["id"], self.failures, PAIR_MAX_FAILS)
+            return
+        user = msg.get("from") or {}
+        self.chat_id, self.who, self.code = chat["id"], (user.get("first_name") or "")[:40], None
+        await self.rt.telegram_paired(self.chat_id, self.who)
+        await self._send(f"Connected. This chat is now the Telegram channel in {self.rt.persona.name}'s app: what you write "
+                         "here shows up there, and the other way round. Only this chat is ever answered.", plain=True)
+
+    async def mirror(self, ctx) -> None:
+        """A message written in the app's Telegram chat: the answer also goes to your phone."""
+        async for event in ctx.follow(0):
+            if event and event["type"] == "run_end":
+                final = strip_refs(event.get("output") or "")
+                if final and self.chat_id is not None:
+                    await self._send(final)
+                return
+
     async def start(self) -> None:
+        if self.chat_id is None:
+            self.new_code()
+            try:
+                await self._call("deleteWebhook")  # polling and a webhook cannot both be set
+            except RuntimeError as exc:
+                self.last_error = str(exc)[:200]
         policy.NOTIFIERS.append(self.on_approval)
         self.task = asyncio.create_task(self._poll(), name="telegram")
 
@@ -171,6 +251,8 @@ class TelegramChannel:
             log.exception("telegram update failed")
 
     def _mine(self, chat_id: int) -> bool:
+        if self.chat_id is None:
+            return False
         if chat_id == self.chat_id:
             return True
         log.warning("telegram: ignored a message from chat %s (only RIKI_TELEGRAM_CHAT_ID is answered)", chat_id)
@@ -212,19 +294,22 @@ class TelegramChannel:
         return "data:image/jpeg;base64," + base64.b64encode(r.content).decode()
 
     async def _message(self, msg: dict) -> None:
+        if self.chat_id is None:
+            await self._pair(msg)
+            return
         if not self._mine(msg["chat"]["id"]):
             return
         rt = self.rt
         text = (msg.get("text") or msg.get("caption") or "").strip()
-        thread = await _main_thread(rt)
+        thread = await telegram_thread(rt)
         if text.lower() in ("/stop", "stop"):
             busy = rt.active_run(thread)
             if busy is not None:
                 rt.runs[busy.run_id][1].cancel()
             return
         if text.lower() in ("/start", "/help"):
-            await self._send("I'm here. Write to me like you do in the app; this is the same conversation. "
-                             "/stop stops what I'm doing.", plain=True)
+            await self._send("I'm here. Write to me like you do in the app: this chat is the Telegram channel there, "
+                             "and it is kept in sync. /stop stops what I'm doing.", plain=True)
             return
         images = []
         if msg.get("photo"):
@@ -268,15 +353,8 @@ class TelegramChannel:
                 return
 
 
-async def _main_thread(rt) -> str:
-    from sqlalchemy import select
+async def telegram_thread(rt) -> str:
+    """The permanent chat in the app that everything said over Telegram lands in (created on first use)."""
+    from ..ops import own_thread
 
-    from ..db import Thread
-
-    async with rt.db.session() as s:
-        t = await s.scalar(select(Thread).where(Thread.kind == "main").limit(1))
-        if t is None:
-            t = Thread(title=rt.persona.name, kind="main")
-            s.add(t)
-            await s.commit()
-        return t.id
+    return await own_thread(rt, "telegram", "Telegram")

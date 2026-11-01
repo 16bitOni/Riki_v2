@@ -18,8 +18,14 @@ async def notify(rt, text: str, *, run_id: str | None = None, in_app: bool = Tru
         async with rt.db.session() as s:
             s.add(Message(thread_id=thread, role="assistant", content=text, run_id=run_id))
             await s.commit()
-    if getattr(rt, "telegram", None) is not None:
+    tg = getattr(rt, "telegram", None)
+    if tg is not None and tg.chat_id is not None:
         try:
-            await rt.telegram.notify(text)
+            from .channels.telegram import telegram_thread
+
+            async with rt.db.session() as s:  # the Telegram chat in the app keeps what was sent to the phone
+                s.add(Message(thread_id=await telegram_thread(rt), role="assistant", content=text, run_id=run_id))
+                await s.commit()
+            await tg.notify(text)
         except Exception:
             log.exception("could not send the message to Telegram")

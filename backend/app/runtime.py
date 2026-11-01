@@ -8,6 +8,7 @@ from contextlib import AsyncExitStack
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
+from cryptography.fernet import InvalidToken
 from langchain.chat_models import init_chat_model
 from langchain.embeddings import init_embeddings
 from riki_memory import MemoryConfig, RikiMemory
@@ -27,6 +28,7 @@ from .files import file_tools
 from .ops import heartbeat_loop, interrupt_stale_runs, resume_waiting_runs
 from .sandbox import sandbox_tools
 from .schedules import schedule_tools
+from .settings_store import get_value, load_overrides, put_value, snapshot_defaults
 
 log = logging.getLogger(__name__)
 
@@ -75,13 +77,17 @@ class Runtime:
         self.runs: dict[str, tuple] = {}  # run_id -> (RunContext, task): followable, stoppable (see turn.start_run)
         self.mcp_status: dict[str, dict] = {}
         self._heartbeat: asyncio.Task | None = None
-        self.telegram = None  # the phone channel, when RIKI_TELEGRAM_TOKEN and RIKI_TELEGRAM_CHAT_ID are set
+        self.telegram = None  # the phone channel, once a bot is connected (in the app, or by RIKI_TELEGRAM_* once)
+        self.telegram_problem = ""  # why a saved connection could not be opened
+        self.defaults: dict = {}  # what .env gave for the settings the app can change
 
     async def start(self) -> None:
         s = self.settings
         policy.SHUTTING_DOWN = False
         self.db = Database(s.database_url)
         await self._check_schema()
+        self.defaults = snapshot_defaults(s)
+        await load_overrides(self)  # what you changed in Settings wins over .env
         self.models = self._models or {"fast": _model(s.model, s), "smart": _model(s.smart_model, s)}
         self.model_names = {"fast": s.model, "smart": s.smart_model}
         self.call_kwargs = {tier: ({"cache_control": {"ttl": "5m"}}
@@ -112,12 +118,84 @@ class Runtime:
         self.apps = Apps(self)
         await self.apps.start()
         self._heartbeat = asyncio.create_task(heartbeat_loop(self))
-        if s.telegram_token and s.telegram_chat_id:
-            from .channels.telegram import TelegramChannel
-
-            self.telegram = TelegramChannel(self, s.telegram_token.get_secret_value(), s.telegram_chat_id)
-            await self.telegram.start()
+        await self.telegram_load()
         self.spawn(resume_waiting_runs(self))  # requests that were waiting for you when Riki last stopped
+
+    def sync_sandbox(self) -> None:
+        """Switch run_python on or off to match the setting, without a restart."""
+        want = self.settings.sandbox
+        if not want:
+            self.registry.remove("run_python")
+        elif self.registry.get("run_python") is None:
+            for entry in sandbox_tools(self):
+                self.registry.add(entry)
+
+    # -- the phone channel: connected from Settings, the token stored encrypted ----------------------------
+
+    async def telegram_load(self) -> None:
+        """Open the saved connection. A bot set in .env is taken over once (encrypted into the database), so after that
+        Settings is the one place that controls it."""
+        from .channels.telegram import TelegramChannel
+
+        s, box = self.settings, self.apps.box
+        rec = await get_value(self.db, "telegram")
+        if rec is None and s.telegram_token and s.telegram_chat_id:
+            rec = {"token": box.encrypt(s.telegram_token.get_secret_value().encode()).decode(),
+                   "chat_id": s.telegram_chat_id, "bot": "", "who": ""}
+            await put_value(self.db, "telegram", rec)
+        if not rec or rec.get("off"):
+            return
+        try:
+            token = box.decrypt(rec["token"].encode()).decode()
+        except InvalidToken:
+            self.telegram_problem = "The saved Telegram token cannot be opened (the password changed). Connect it again."
+            log.warning(self.telegram_problem)
+            return
+        self.telegram_problem = ""
+        self.telegram = TelegramChannel(self, token, rec.get("chat_id"), rec.get("bot", ""), rec.get("who", ""))
+        await self.telegram.start()
+
+    async def _telegram_record(self, **changes) -> None:
+        rec = await get_value(self.db, "telegram") or {}
+        await put_value(self.db, "telegram", {**rec, **changes})
+
+    async def telegram_connect(self, token: str) -> dict:
+        """Check the token with Telegram, keep it encrypted, and start waiting for the pairing code."""
+        from .channels.telegram import TelegramChannel, bot_info
+
+        bot = (await bot_info(token)).get("username", "")
+        await self.telegram_stop()
+        await put_value(self.db, "telegram", {"token": self.apps.box.encrypt(token.encode()).decode(),
+                                              "chat_id": None, "bot": bot, "who": ""})
+        self.telegram_problem = ""
+        self.telegram = TelegramChannel(self, token, None, bot)
+        await self.telegram.start()
+        return self.telegram.status()
+
+    async def telegram_stop(self) -> None:
+        if self.telegram is not None:
+            channel, self.telegram = self.telegram, None
+            await channel.stop()
+
+    async def telegram_disconnect(self) -> None:
+        await self.telegram_stop()
+        await put_value(self.db, "telegram", {"off": True})  # also keeps an old .env value from coming back
+
+    async def telegram_repair(self) -> dict:
+        """Pair a different chat (a new phone): keeps the bot, forgets the chat, shows a new code."""
+        if self.telegram is None:
+            raise ValueError("connect a bot first")
+        self.telegram.unpair()
+        await self._telegram_record(chat_id=None, who="")
+        return self.telegram.status()
+
+    async def telegram_paired(self, chat_id: int, who: str) -> None:
+        await self._telegram_record(chat_id=chat_id, who=who)
+
+    def telegram_status(self) -> dict:
+        if self.telegram is None:
+            return {"connected": False, "paired": False, "error": self.telegram_problem}
+        return self.telegram.status()
 
     async def reload_persona(self) -> Persona:
         """(Re)build the system prompts. Only here and on persona edits, so the prompt stays byte-stable
@@ -156,8 +234,7 @@ class Runtime:
 
     async def stop(self) -> None:
         policy.SHUTTING_DOWN = True  # runs waiting for you stay waiting, so the next start can continue them
-        if self.telegram is not None:
-            await self.telegram.stop()
+        await self.telegram_stop()
         if self._heartbeat:
             self._heartbeat.cancel()
             await asyncio.gather(self._heartbeat, return_exceptions=True)

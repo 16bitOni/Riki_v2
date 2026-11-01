@@ -162,6 +162,15 @@ class Schedule(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class AppSetting(Base):
+    """Settings changed in the app (they win over the environment), and the Telegram connection (token encrypted)."""
+
+    __tablename__ = "app_settings"
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[dict | list | str | int | float | bool | None] = mapped_column(JSONB)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class Nudge(Base):
     """A message Riki sent on its own initiative, with how you reacted (this is what teaches it when to stay quiet)."""
 

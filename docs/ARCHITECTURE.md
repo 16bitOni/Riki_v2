@@ -136,9 +136,22 @@ then act on the fast one, then the guards in code: one nudge a day at most, none
 this week, and twice as long a wait after three ignored in a row). Each job is a run of its own (`jobs.job_run`), so it is
 traced and priced. `notify` puts what Riki says into the check-in thread and on Telegram.
 
+## Settings you can change in the app
+
+`settings_store.py`: a whitelist (`EDITABLE`: thinking on/off and interval, quiet hours, daily cap, prices, sandbox, default
+effort, time zone, your name) stored in `app_settings`, applied to the one running `Settings` object in place (everything
+holds a reference to it, so no restart), re-applied at start over `.env`, and reset per key with `null`. Switching the sandbox
+adds or removes `run_python`; changing your name rebuilds the prompts. `GET/PUT /api/settings`, `GET /api/nudges`,
+`GET/DELETE /api/grants` feed the Settings page.
+
 ## The phone and files
 
-`channels/telegram.py` long-polls Telegram for ONE chat id and shares the main conversation with the app. Approvals and
+`channels/telegram.py` long-polls Telegram for ONE chat id. It is connected from Settings: `POST /api/telegram` checks the
+bot token (`getMe`) and stores it encrypted (`apps.secret_box`) in `app_settings`; the channel then waits for a one-time code
+(10 minutes, in memory, 5 wrong guesses lock it), and the first private chat to send it is paired. Until then every message
+is ignored without an answer. Everything said over Telegram lands in one permanent thread (`kind="telegram"`, always listed
+under the main chat); a message written in that thread in the app is answered on the phone too, and `notify` keeps what it
+sends to the phone in the same thread. `RIKI_TELEGRAM_*` in `.env` only seeds a connection once. Approvals and
 `ask_user` questions go to the phone as buttons from any chat (`policy.NOTIFIERS`). Uploads (`POST /api/uploads`) are turned
 into text (PDF, Word, Excel, CSV, text) and read with `read_file` the way `fetch_url` reads a page. `run_python` is a
 Docker container with no network when `RIKI_SANDBOX=true`.

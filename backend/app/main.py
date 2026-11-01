@@ -28,11 +28,12 @@ from .agent.prompts import ONBOARD
 from .apps import CATALOG, CATEGORIES, ROLES, search_directory
 from .cognition import feedback_lesson, latest_reflection, save_edit
 from .config import Effort, get_settings
-from .db import (Approval, Artifact, Connection, EvalRun, Feedback, Message, Persona, Run, Schedule, Span, Thread, new_id,
-                 utcnow)
+from .db import (Approval, ApprovalGrant, Artifact, Connection, EvalRun, Feedback, Message, Nudge, Persona, Run, Schedule,
+                 Span, Thread, new_id, utcnow)
 from .files import Unreadable, save_upload
 from .ops import LOGS, beat, own_thread
 from .runtime import Runtime
+from .settings_store import SettingsPatch, save_patch, view as settings_view
 from .spend import budget_state, spend_today
 from .tracing import clean, scrub
 from .turn import ensure_thread, start_run
@@ -111,7 +112,7 @@ async def me(rt: Auth):
             "avatar": f"/api/persona/avatar?v={int(p.updated_at.timestamp())}" if p.avatar_type else None,
             "prompt_version": rt.prompt_version, "max_depth": s.max_depth, "quiet_hours": s.quiet_hours,
             "timezone": s.timezone, "default_effort": s.default_effort, "role": p.role, "onboarded": p.onboarded,
-            "telegram": rt.telegram is not None}
+            "telegram": rt.telegram is not None and rt.telegram.chat_id is not None}
 
 
 # --- persona and heartbeat --------------------------------------------------------------------
@@ -424,6 +425,9 @@ async def chat(body: ChatIn, rt: Auth):
         raise HTTPException(409, {"message": "Riki is still working on your last message in this chat.",
                                   "run_id": busy.run_id})
     ctx = start_run(rt, thread_id, body.message, images=body.images, effort=body.effort, learn=body.learn)
+    if rt.telegram is not None and rt.telegram.chat_id is not None and thread_id == await own_thread(
+            rt, "telegram", "Telegram"):
+        rt.spawn(rt.telegram.mirror(ctx))  # written in the app's Telegram chat: the answer also reaches the phone
     return _follow(ctx, 0, first={"type": "thread", "thread_id": thread_id, "run_id": ctx.run_id})
 
 
@@ -529,6 +533,15 @@ async def main_thread(rt: Auth):
             s.add(t)
             await s.commit()
     return {"id": t.id, "title": t.title, "kind": t.kind, "created_at": t.created_at}
+
+
+@app.get("/api/threads/telegram")
+async def telegram_thread_(rt: Auth):
+    """The permanent Telegram chat: whatever is said over Telegram lives here (created on first use, empty until a
+    phone is connected)."""
+    await own_thread(rt, "telegram", "Telegram")
+    row = (await _threads(rt, ["telegram"], 1))[0]
+    return {**row, "telegram": rt.telegram_status()}
 
 
 @app.get("/api/threads/{thread_id}/messages")
@@ -917,6 +930,94 @@ async def cancel_schedule(schedule_id: HexId, rt: Auth):
         if row is None:
             raise HTTPException(404, "no such schedule")
         row.status = "cancelled"
+        await s.commit()
+    return {"ok": True}
+
+
+# --- settings you can change from the app, Telegram, and what Riki is allowed to do ------------------
+
+@app.get("/api/settings")
+async def get_settings_view(rt: Auth):
+    return await settings_view(rt)
+
+
+@app.put("/api/settings")
+async def put_settings(body: SettingsPatch, rt: Auth):
+    """Only the fields you send change; null puts one back to what .env says."""
+    await save_patch(rt, body)
+    return await settings_view(rt)
+
+
+class TelegramIn(BaseModel):
+    token: str = Field(pattern=r"^\d{6,12}:[A-Za-z0-9_-]{30,50}$", max_length=80)
+
+
+@app.get("/api/telegram")
+async def telegram_status(rt: Auth):
+    return rt.telegram_status()
+
+
+@app.post("/api/telegram")
+async def telegram_connect(body: TelegramIn, rt: Auth):
+    """Check the bot token with Telegram, keep it encrypted, and wait for the pairing code from your phone."""
+    try:
+        return await rt.telegram_connect(body.token)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@app.post("/api/telegram/pair")
+async def telegram_pair_again(rt: Auth):
+    """A fresh code (the old one expired or was locked), or a different phone: the bot stays, the chat is forgotten."""
+    try:
+        return await rt.telegram_repair()
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@app.post("/api/telegram/test")
+async def telegram_test(rt: Auth):
+    tg = rt.telegram
+    if tg is None or tg.chat_id is None:
+        raise HTTPException(400, "Telegram is not paired yet")
+    try:
+        await tg.notify(f"Hello from {rt.persona.name}. If you can read this, the connection works.")
+    except Exception as exc:
+        raise HTTPException(502, f"Telegram refused the message: {str(exc)[:160]}")
+    return {"ok": True}
+
+
+@app.delete("/api/telegram")
+async def telegram_disconnect(rt: Auth):
+    """Forget the bot token and the paired chat. The messages already in the Telegram chat stay."""
+    await rt.telegram_disconnect()
+    return {"ok": True}
+
+
+@app.get("/api/nudges")
+async def nudges(rt: Auth, limit: int = Query(30, ge=1, le=200)):
+    """What Riki said on its own initiative, and whether you answered (that is what teaches it when to stay quiet)."""
+    async with rt.db.session() as s:
+        rows = (await s.scalars(select(Nudge).order_by(Nudge.sent_at.desc()).limit(limit))).all()
+    return [_row(r) for r in rows]
+
+
+@app.get("/api/grants")
+async def grants(rt: Auth):
+    """"Allow for 30 minutes" grants that are still running, so you can end one early."""
+    async with rt.db.session() as s:
+        rows = (await s.scalars(select(ApprovalGrant).where(ApprovalGrant.expires_at > utcnow())
+                                .order_by(ApprovalGrant.expires_at))).all()
+    return [_row(r) for r in rows]
+
+
+@app.delete("/api/grants/{grant_id}")
+async def revoke_grant(grant_id: HexId, rt: Auth):
+    async with rt.db.session() as s:
+        row = await s.get(ApprovalGrant, grant_id)
+        if row is None:
+            raise HTTPException(404, "no such grant")
+        await s.delete(row)
         await s.commit()
     return {"ok": True}
 

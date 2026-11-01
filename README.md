@@ -21,7 +21,8 @@ and shows its working for every answer.
 - **Knows you, and tells you.** A living read on you (Memory tab, editable), lessons drawn from how chats went, and a
   thinking cycle that may end in one specific message. Reminders and scheduled tasks. All of it checks for new input first,
   so a quiet day costs nothing.
-- **Reachable.** Telegram (your one chat): talk to Riki, tap Allow or Deny, answer its questions. A change waiting for you
+- **Reachable.** Telegram, connected from Settings with a one-time code (your one chat, kept as a permanent chat in the app):
+  talk to Riki, tap Allow or Deny, answer its questions. A change waiting for you
   survives a restart and is never done twice. "Allow for 30 minutes" for long jobs; never for anything that moves money.
 - **Costs in view.** Every answer shows its time and cost; a daily budget pauses background work and then shortens answers.
 

@@ -48,7 +48,7 @@ export type Msg = {
 export type Thread = {
   id: string;
   title: string;
-  kind: "main" | "side" | "heartbeat";
+  kind: "main" | "side" | "heartbeat" | "telegram";
   created_at: string;
   last_at: string;
   preview: string; // last message, trimmed
@@ -104,6 +104,38 @@ export type Me = {
   default_effort: Effort;
   role: string; // what you use Riki for (apps.json roles), "" until setup
   onboarded: boolean; // setup finished or skipped
+  telegram: boolean; // a phone is paired
+};
+
+export type TelegramStatus = {
+  connected: boolean; // a bot token is saved
+  paired: boolean; // and a chat has proved it is you
+  bot?: string;
+  who?: string;
+  error?: string;
+  code?: string | null; // while pairing
+  link?: string | null;
+  expires_in?: number;
+  locked?: boolean;
+};
+
+export type SettingsValues = {
+  cognition: boolean;
+  cognition_interval_h: number;
+  quiet_hours: string;
+  daily_budget_usd: number | null;
+  sandbox: boolean;
+  default_effort: Effort;
+  timezone: string;
+  user_name: string;
+  prices: Record<string, { input: number; output: number; cached?: number | null }>;
+};
+export type SettingsView = {
+  values: SettingsValues;
+  defaults: SettingsValues; // what .env says
+  overridden: string[]; // changed in the app
+  docker: boolean;
+  models: { main: string; smart: string; embedding: string };
 };
 
 export type Effort = "low" | "medium" | "high";
@@ -199,6 +231,8 @@ export async function upload(file: File): Promise<{ id: string; name: string; ch
 
 export const post = <T = unknown>(path: string, body: unknown) =>
   api<T>(path, { method: "POST", body: JSON.stringify(body) });
+
+export const del = <T = unknown>(path: string) => api<T>(path, { method: "DELETE" });
 
 export const put = <T = unknown>(path: string, body: unknown) =>
   api<T>(path, { method: "PUT", body: JSON.stringify(body) });

@@ -1,8 +1,8 @@
 import "@fontsource-variable/inter/opsz.css";
-import { Bell, BookMarked, Eraser, History, House, LayoutGrid, LogOut, MessageCircle, Pencil, Plus, Settings, X } from "lucide-react";
+import { Bell, BookMarked, Eraser, History, House, LayoutGrid, LogOut, MessageCircle, Pencil, Plus, Send, Settings, X } from "lucide-react";
 import { FormEvent, StrictMode, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Live, Me, Status, Thread, ago, api, post } from "./api";
+import { Live, Me, Status, TelegramStatus, Thread, ago, api, post } from "./api";
 import { AppsPage } from "./Apps";
 import { Avatar, Mood } from "./Avatar";
 import { Chat } from "./Chat";
@@ -10,8 +10,9 @@ import { ActivityPage, HomePage } from "./Home";
 import { Island } from "./Island";
 import { Onboarding } from "./Onboarding";
 import { ApprovalsPage, MemoryPage } from "./Pages";
-import { SettingsPage } from "./Settings";
+import { SettingsPage, Tab as SettingsTab } from "./Settings";
 import "./styles.css";
+import "./settings.css";
 import { Sheet, Toaster, toast } from "./ui";
 
 const TABS = [
@@ -127,6 +128,8 @@ function App() {
   const [sheet, setSheet] = useState<SheetName>(null);
   const [status, setStatus] = useState<Status | null>(null);
   const [mainId, setMainId] = useState<string | null>(null);
+  const [tg, setTg] = useState<(Thread & { telegram: TelegramStatus }) | null>(null); // the permanent Telegram chat
+  const [settingsTab, setSettingsTab] = useState<SettingsTab | undefined>(undefined);
   const [threadId, setThreadId] = useState<string | null>(null);
   const [sides, setSides] = useState<Thread[] | null>(null);
   const [chatMood, setChatMood] = useState<{ mood: Mood; line: string }>({ mood: "idle", line: "" });
@@ -144,6 +147,7 @@ function App() {
     api<Status>("/status")
       .then(setStatus)
       .catch(() => setStatus(null));
+  const loadTg = () => api<Thread & { telegram: TelegramStatus }>("/threads/telegram").then(setTg).catch(() => {});
   const loadSides = () => api<Thread[]>("/threads").then(setSides).catch(() => {});
   const [outdated, setOutdated] = useState(false); // the server doesn't know /live: it is running older code than this page
   const loadLive = () =>
@@ -153,8 +157,9 @@ function App() {
 
   /** Delete a topic chat; the main chat can only be cleared. Asks first, and says why when it can't. */
   async function removeChat(id: string) {
-    const isMain = id === mainId;
-    const name = isMain ? "the main chat" : `“${sides?.find((t) => t.id === id)?.title ?? "this chat"}”`;
+    const isTg = id === tg?.id;
+    const isMain = id === mainId || isTg;
+    const name = isTg ? "the Telegram chat" : isMain ? "the main chat" : `“${sides?.find((t) => t.id === id)?.title ?? "this chat"}”`;
     const ask = isMain
       ? `Clear ${name}? The messages go; what Riki learned stays in Memory and what it did stays in Activity.`
       : `Delete ${name}? What Riki learned stays in Memory and what it did stays in Activity.`;
@@ -167,8 +172,9 @@ function App() {
     }
     toast(isMain ? "Chat cleared" : "Chat deleted");
     loadSides();
+    loadTg();
     if (threadId === id) {
-      setThreadId(mainId);
+      if (!isMain) setThreadId(mainId);
       setChatKey((k) => k + 1); // reload what the chat shows
     }
   }
@@ -183,12 +189,17 @@ function App() {
       setThreadId((cur) => cur ?? t.id);
     });
     loadSides();
+    loadTg();
     loadStatus();
     loadLive();
     const slow = setInterval(loadStatus, 6000);
     const fast = setInterval(() => !document.hidden && loadLive(), 2000); // asks and progress, on any page
     return () => (clearInterval(slow), clearInterval(fast));
   }, [me?.name]);
+
+  useEffect(() => {
+    if (me) loadTg(); // the phone may have been connected or written to meanwhile
+  }, [sheet, tab]);
 
   function onMood(mood: Mood, line: string) {
     window.clearTimeout(moodTimer.current);
@@ -227,9 +238,13 @@ function App() {
     setTab("Chat");
     setSheet(null);
   };
+  const openSettings = (tab?: SettingsTab) => {
+    setSettingsTab(tab);
+    setSheet("settings");
+  };
   const go = (s: "Approvals" | "Memory" | "Settings") =>
-    s === "Memory" ? setTab("Memory") : setSheet(s === "Approvals" ? "approvals" : "settings");
-  const chatTitle = threadId === mainId ? "Main chat" : (sides?.find((t) => t.id === threadId)?.title ?? "New chat");
+    s === "Memory" ? setTab("Memory") : s === "Approvals" ? setSheet("approvals") : openSettings();
+  const chatTitle = threadId === mainId ? "Main chat" : threadId === tg?.id ? "Telegram" : (sides?.find((t) => t.id === threadId)?.title ?? "New chat");
 
   const tabButtons = (cls: string) =>
     TABS.map(([t, Icon]) => (
@@ -250,7 +265,7 @@ function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <button className="presence" onClick={() => setSheet("settings")} aria-label={`${me.agent_name}, ${presence}. Open settings`}>
+        <button className="presence" onClick={() => openSettings()} aria-label={`${me.agent_name}, ${presence}. Open settings`}>
           <Avatar mood={mood} src={me.avatar} name={me.agent_name} size={30} />
           <span className="presence-text">
             <span className="presence-name">{me.agent_name}</span>
@@ -268,7 +283,7 @@ function App() {
             <Bell size={18} strokeWidth={1.8} />
             {pending > 0 && <span className="badge-dot">{pending}</span>}
           </button>
-          <button className="icon round" aria-label="Settings" title="Settings" onClick={() => setSheet("settings")}>
+          <button className="icon round" aria-label="Settings" title="Settings" onClick={() => openSettings()}>
             <Settings size={18} strokeWidth={1.8} />
             {status && !status.ok && <span className="badge-dot alert" aria-hidden="true" />}
           </button>
@@ -290,7 +305,8 @@ function App() {
             key={chatKey}
             me={me}
             threadId={threadId}
-            isMain={threadId !== null && threadId === mainId}
+            isMain={threadId !== null && (threadId === mainId || threadId === tg?.id)}
+            channel={threadId !== null && threadId === tg?.id ? { paired: tg.telegram.paired, bot: tg.telegram.bot, onConnect: () => openSettings("Channels") } : undefined}
             title={chatTitle}
             initialMessage={initial}
             onInitialSent={() => setInitial(null)}
@@ -347,6 +363,36 @@ function App() {
                 </button>
               </span>
             </div>
+            {tg && (
+              <div className={`chat-row tg ${threadId === tg.id ? "on" : ""}`}>
+                <button className="chat-row-open" onClick={() => openThread(tg.id)} aria-current={threadId === tg.id ? "true" : undefined}>
+                  <span className="chat-row-icon">
+                    <Send size={16} aria-hidden="true" />
+                  </span>
+                  <span className="chat-row-text">
+                    <span className="chat-row-top">
+                      <span className="chat-row-title">Telegram</span>
+                      {tg.preview && <time>{ago(tg.last_at)}</time>}
+                    </span>
+                    <span className="chat-row-preview">
+                      {tg.preview ||
+                        (tg.telegram.paired
+                          ? `Connected${tg.telegram.who ? ` to ${tg.telegram.who}` : ""}. Messages from your phone appear here.`
+                          : tg.telegram.connected
+                            ? "Finish pairing to start"
+                            : `Not connected. Tap to talk to ${me.agent_name} from your phone.`)}
+                    </span>
+                  </span>
+                </button>
+                {tg.preview && (
+                  <span className="chat-row-actions">
+                    <button className="icon small" aria-label="Clear the Telegram chat" title="Clear" onClick={() => removeChat(tg.id)}>
+                      <Eraser size={14} />
+                    </button>
+                  </span>
+                )}
+              </div>
+            )}
             {sides?.length === 0 && <p className="muted small chat-list-empty">Start a separate chat for one topic. It keeps the main chat tidy.</p>}
             {sides &&
               dedupe(sides).map((t) => (
@@ -369,7 +415,16 @@ function App() {
       )}
       {sheet === "settings" && (
         <Sheet title="Settings" onClose={() => setSheet(null)} wide>
-          <SettingsPage me={me} status={status} mood={mood} onSaved={loadMe} />
+          <SettingsPage
+            me={me}
+            status={status}
+            mood={mood}
+            onSaved={loadMe}
+            tab={settingsTab}
+            onOpenTelegram={() => {
+              if (tg) openThread(tg.id);
+            }}
+          />
           <div className="settings-foot">
             <span className="muted small grow">Signed in as {me.name}</span>
             <button

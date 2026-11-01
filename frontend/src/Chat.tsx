@@ -75,6 +75,7 @@ export function Chat(props: {
   onMood: (mood: Mood, line: string) => void;
   onAuthLost: () => void;
   onOpenApps: (appId: string) => void; // a connect card for an app that signs in on its own page
+  channel?: { paired: boolean; bot?: string; onConnect: () => void }; // this is the permanent Telegram chat
 }) {
   const { me } = props;
   const [messages, setMessages] = useState<ChatMsg[]>([]);
@@ -445,12 +446,21 @@ export function Chat(props: {
             {!loading && messages.length === 0 && (
               <div className="chat-empty">
                 <Avatar mood={draft.trim() ? "listening" : "idle"} src={me.avatar} name={me.agent_name} size={56} />
-                <h1>{props.isMain ? `What's on your mind?` : "What's this chat about?"}</h1>
+                <h1>{props.channel ? "Telegram" : props.isMain ? `What's on your mind?` : "What's this chat about?"}</h1>
                 <p>
-                  {props.isMain
-                    ? `Your ongoing conversation with ${me.agent_name}. Anything worth keeping is remembered.`
-                    : "Your first message names it. Keeps one topic out of your main chat."}
+                  {props.channel
+                    ? props.channel.paired
+                      ? `Everything you say to ${me.agent_name} over Telegram lands here, and what you write here reaches your phone too.`
+                      : `Connect Telegram to talk to ${me.agent_name} from your phone. Every message from there will live in this chat.`
+                    : props.isMain
+                      ? `Your ongoing conversation with ${me.agent_name}. Anything worth keeping is remembered.`
+                      : "Your first message names it. Keeps one topic out of your main chat."}
                 </p>
+                {props.channel && !props.channel.paired && (
+                  <button className="primary chat-cta" onClick={props.channel.onConnect}>
+                    {props.channel.bot ? "Finish connecting" : "Connect Telegram"}
+                  </button>
+                )}
               </div>
             )}
             {messages.map((m, i) => {

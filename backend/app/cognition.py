@@ -138,7 +138,7 @@ async def save_edit(rt, content: str) -> Reflection:
 
 _LESSON_THREADS = text("""
     select t.id from threads t
-    where t.kind in ('main', 'side')
+    where t.kind in ('main', 'side', 'telegram')
       and (select max(created_at) from messages where thread_id = t.id) < now() - interval '6 hours'
       and (select count(*) from messages m where m.thread_id = t.id
            and m.created_at > coalesce(t.lessons_at, 'epoch')) >= 6
