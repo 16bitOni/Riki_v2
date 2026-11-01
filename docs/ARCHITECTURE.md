@@ -114,8 +114,34 @@ fails when models and migrations disagree.
 - **Own trace store** rather than an external tracing SaaS: the UI needs the tree, it's single-user,
   and the trace is part of the product ("why did you say that?"). Exporting to OpenTelemetry later is a
   straight mapping of the `spans` table.
-- **In-process approvals** (an awaited future) rather than graph checkpoints: works at any depth with no
-  resume logic. The trade-off: a server restart denies pending approvals (fail closed) and the run ends.
+- **Approvals are database rows, not graph checkpoints.** A request waits up to 24 h as an awaited future *and* as a row
+  (`approvals`: thread, a hash of the tool and arguments, status, the result once it ran). If Riki restarts while a run
+  waits, the next start runs that request again (`ops.resume_waiting_runs`); the repeated call finds the same row, so the
+  same card is still there, and an action that already ran is handed back its stored result instead of running twice.
+  The model does repeat its reasoning (tokens) after a restart; nothing it already did is repeated. Only chat runs
+  waiting for you are resumed; a run that was mid-flight is closed as interrupted. # shortcut: replay with memoized
+  writes, not LangGraph's Postgres checkpointer (which needs a different driver on Windows and per-agent resume logic);
+  upgrade if replaying long read-only research after a restart becomes a real cost.
+- **"Allow for 30 minutes"** is a row in `approval_grants` (chat + tool). Tools that move money (`policy.moves_money`)
+  never get one and always ask.
+- **ask_user** reuses the approval row for a question: the options are the arguments, the answer is stored as the result.
+
+## Riki between chats
+
+`ops.heartbeat_loop` ticks every minute: it fires due schedules (claimed with `FOR UPDATE SKIP LOCKED`, so never twice)
+and, every five minutes, starts `ops.background_work` unless the daily budget is 80% used: `cognition.refresh_reflection`
+(a new read on you after 10 new memories), `learn_lessons` (a chat quiet for 6 h yields up to 3 preference memories) and
+`run_cycle` (every `RIKI_COGNITION_INTERVAL_H`, outside quiet hours, only if something is new: think on the stronger model,
+then act on the fast one, then the guards in code: one nudge a day at most, none within 3 h of a chat, none on a topic used
+this week, and twice as long a wait after three ignored in a row). Each job is a run of its own (`jobs.job_run`), so it is
+traced and priced. `notify` puts what Riki says into the check-in thread and on Telegram.
+
+## The phone and files
+
+`channels/telegram.py` long-polls Telegram for ONE chat id and shares the main conversation with the app. Approvals and
+`ask_user` questions go to the phone as buttons from any chat (`policy.NOTIFIERS`). Uploads (`POST /api/uploads`) are turned
+into text (PDF, Word, Excel, CSV, text) and read with `read_file` the way `fetch_url` reads a page. `run_python` is a
+Docker container with no network when `RIKI_SANDBOX=true`.
 
 ## Apps (`app/apps.py`, `app/apps.json`)
 
@@ -149,7 +175,7 @@ Apps are remote MCP servers you connect from the Apps tab, next to the fixed ser
 
 ## Next steps (not built yet)
 
-- Routines (several scheduled check-ins with templates) and a Drafts outbox for things Riki writes but you send.
-- Reminders and scheduled tasks (needs a scheduler and a notification channel).
+- A Drafts outbox for things Riki writes but you send.
+- A checkpointer if replaying a long run after a restart gets expensive (see approvals above).
 - Durable memory writes (see riki-mem improvements: an outbox).
 - Startup timeout per MCP server (a server that hangs on start currently delays startup).

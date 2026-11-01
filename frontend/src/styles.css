@@ -731,3 +731,10 @@ code.copy { display: block; padding: 10px 12px; border-radius: 10px; background:
 
 button.link.unverified { color: var(--warn); }
 button.link.unverified:hover { color: var(--snow); }
+
+.chip button { background: none; padding: 0 0 0 6px; color: inherit; opacity: 0.7; }
+.chip button:hover { opacity: 1; }
+.approval .row.wrap { flex-wrap: wrap; }
+.read-on-you { margin: 0 0 20px; padding: 16px 18px; border-radius: 16px; background: var(--graphite); border: 1px solid var(--hairline); }
+.read-on-you .row-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+.read-on-you textarea { width: 100%; min-height: 180px; margin-bottom: 8px; }

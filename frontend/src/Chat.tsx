@@ -2,7 +2,7 @@ import { ArrowUp, ChevronDown, Copy, Gauge, Mic, PanelRight, Paperclip, Sparkles
 import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import { Reply, RunDrawer, Steps, liveLine } from "./Activity";
 import { ArtifactCard, ArtifactView } from "./Artifacts";
-import { ApprovalReq, Artifact, Busy, Effort, Gone, Live, Me, Msg, RunEnd, RunEvent, RunRow, Span, Unauthorized, api, followRun, post, streamChat } from "./api";
+import { ApprovalReq, Artifact, Busy, Effort, Gone, Live, Me, Msg, RunEnd, RunEvent, RunRow, Span, Unauthorized, api, followRun, post, streamChat, upload } from "./api";
 import { ConnectCard } from "./Apps";
 import { Avatar, Mood } from "./Avatar";
 import { Skeleton, Typing, toast, useAutoGrow, useSmoothText } from "./ui";
@@ -29,6 +29,7 @@ async function shrink(file: File): Promise<string> {
 }
 
 type ChatMsg = Msg & { steps?: Span[]; latency_ms?: number | null };
+type Doc = { id: string; name: string };
 // live: the run is still going, so the drawer shows the streaming spans instead of a saved trace
 type Detail = { run: Partial<RunRow> | null; spans: Span[]; approvals: ApprovalReq[]; focus: string | null; live?: boolean };
 
@@ -79,6 +80,7 @@ export function Chat(props: {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [draft, setDraft] = useState("");
   const [pics, setPics] = useState<string[]>([]); // attached to the next message
+  const [docs, setDocs] = useState<Doc[]>([]); // files attached to the next message (PDF, Word, Excel, CSV, text)
   const [effort, setEffort] = useState<Effort>(() => {
     try {
       const saved = localStorage.getItem("riki.effort") as Effort;
@@ -236,7 +238,7 @@ export function Chat(props: {
       setMessages((m) => [
         ...m.slice(0, -2),
         ...(m.length > 1 ? [{ ...m[m.length - 2], run_id: m[m.length - 2].run_id ?? e.run_id }] : []),
-        { ...m[m.length - 1], content: e.output, run_id: e.run_id, steps: l.spans, latency_ms: e.latency_ms, error: e.error, checks: e.checks },
+        { ...m[m.length - 1], content: e.output, run_id: e.run_id, steps: l.spans, latency_ms: e.latency_ms, error: e.error, checks: e.checks, cost_usd: e.cost_usd },
       ]);
       // a drawer opened mid-run keeps the final trace instead of going blank
       setDetail((d) =>
@@ -300,6 +302,15 @@ export function Chat(props: {
   }
 
   async function attach(files: File[]) {
+    const others = files.filter((f) => !f.type.startsWith("image/"));
+    for (const f of others.slice(0, 3)) {
+      try {
+        const up = await upload(f);
+        setDocs((d) => [...d, { id: up.id, name: up.name }]);
+      } catch (e) {
+        toast(e instanceof Error ? e.message : String(e), "error");
+      }
+    }
     const images = files.filter((f) => f.type.startsWith("image/"));
     if (!images.length) return;
     if (pics.length + images.length > 4) toast("You can send up to 4 pictures at a time.");
@@ -314,10 +325,17 @@ export function Chat(props: {
   async function send(text: string) {
     text = text.trim();
     const images = pics;
+    const files = docs;
+    if (files.length && text !== "") {
+      text += "\n\n" + files.map((d) => `[Attached file: ${d.name} (file id ${d.id}); read it with read_file]`).join("\n");
+    } else if (files.length) {
+      text = files.map((d) => `[Attached file: ${d.name} (file id ${d.id}); read it with read_file]`).join("\n");
+    }
     if (busy && (text || images.length)) toast("Riki is still working on your last message. You can stop it with the square button.");
     if ((!text && !images.length) || busy) return;
     setDraft("");
     setPics([]);
+    setDocs([]);
     setError("");
     setLive({ spans: [], approvals: [], runId: null });
     setMessages((m) => [
@@ -493,7 +511,7 @@ export function Chat(props: {
                   )}
                   {!isLive && m.run_id && (
                     <div className="msg-foot">
-                      <Steps spans={m.steps || []} latency={m.latency_ms} onDetails={() => openDetail(m.run_id!)} />
+                      <Steps spans={m.steps || []} latency={m.latency_ms} cost={m.cost_usd} onDetails={() => openDetail(m.run_id!)} />
                       {!!m.checks?.unsupported?.length && (
                         <button className="link small unverified" onClick={() => openDetail(m.run_id!)}>
                           {m.checks.unsupported.length} {m.checks.unsupported.length === 1 ? "claim" : "claims"} not verified ›
@@ -553,6 +571,18 @@ export function Chat(props: {
               <p className="capabilities-note">It never messages anyone for you. Anything that changes something asks first.</p>
             </div>
           )}
+          {docs.length > 0 && (
+            <div className="attachments pending">
+              {docs.map((d) => (
+                <span key={d.id} className="chip">
+                  {d.name}
+                  <button type="button" aria-label={`Remove ${d.name}`} onClick={() => setDocs((all) => all.filter((x) => x.id !== d.id))}>
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
           {pics.length > 0 && (
             <div className="attachments pending">
               {pics.map((src, k) => (
@@ -584,7 +614,7 @@ export function Chat(props: {
             <input
               ref={fileInput}
               type="file"
-              accept="image/*"
+              accept="image/*,.pdf,.docx,.xlsx,.csv,.tsv,.txt,.md,.json"
               multiple
               hidden
               onChange={(e) => {
@@ -592,7 +622,7 @@ export function Chat(props: {
                 e.target.value = "";
               }}
             />
-            <button type="button" className="icon composer-tool" aria-label="Attach a picture" onClick={() => fileInput.current?.click()}>
+            <button type="button" className="icon composer-tool" aria-label="Attach a picture or a file" onClick={() => fileInput.current?.click()}>
               <Paperclip size={18} />
             </button>
             <button
@@ -642,7 +672,7 @@ export function Chat(props: {
                 <Square size={13} fill="currentColor" />
               </button>
             ) : (
-              <button className="send" disabled={busy || (!draft.trim() && !pics.length)} aria-label="Send">
+              <button className="send" disabled={busy || (!draft.trim() && !pics.length && !docs.length)} aria-label="Send">
                 <ArrowUp size={18} strokeWidth={2.5} />
               </button>
             )}

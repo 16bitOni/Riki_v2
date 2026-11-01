@@ -32,6 +32,18 @@ by anything it reads, so it is never the thing that decides what is allowed.
 | Malformed input reaching the database | Pydantic models with length limits; ids validated as 32-hex; SQLAlchemy parameters only | `main.py` |
 | MCP secrets in config | `${VAR}` from environment / `.env`; `.env` is git-ignored | `mcp.py`, `.gitignore` |
 
+## Added with persistent approvals, the phone and files
+
+| Threat | Control | Where |
+|---|---|---|
+| A page, file or app tells Riki to "remember" something (memory poisoning) | A run that has read content nobody here wrote (web, uploaded file, any app or MCP server) is *tainted*: `remember` then needs your approval, and the background learning from that run uses what you said, not the reply built on that content | `RunContext.tainted`, `ToolEntry.ask_if`, `turn.run_turn` |
+| A tool that spends or moves money | `policy.moves_money` (name-based) forces `write`, shows a "moves money" note, and never allows an "Allow for 30 minutes" grant | `agent/policy.py`, `apps.py`, `mcp.py` |
+| A grant used beyond its purpose | A grant is one tool in one chat for 30 minutes, never for external tools (they never run) or money | `policy.decide`, `approval_grants` |
+| An old approval used again | An approval is matched by chat, tool and a hash of the arguments, only within the run it belongs to and the run it continues after a restart; it expires after 24 h; an action already done is never repeated | `policy._obtain` |
+| Someone else uses the phone channel | Exactly one Telegram chat id is answered or messaged (config, not model-chosen); other chats are ignored and logged | `channels/telegram.py` |
+| A malicious file | Uploads become plain text (the original bytes are not kept or opened by anything); text is treated as data and taints the run | `files.py` |
+| Code run for you | `run_python` is off by default; in Docker with no network, a read-only disk, dropped capabilities, 512 MB, one CPU, 60 s | `sandbox.py` |
+
 ## Known limits
 
 - The URL guard checks addresses, not search queries: a `web_search` query could still carry a fragment of private

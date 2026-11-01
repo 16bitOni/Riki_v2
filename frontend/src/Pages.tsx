@@ -1,5 +1,6 @@
 import { ChevronRight, ImagePlus, Search, Trash2 } from "lucide-react";
 import { DragEvent, ReactNode, useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
 import { ApprovalCard, Reply } from "./Activity";
 import { ApprovalReq, Me, Persona, RunRow, Status, ago, api, put, post, seconds, shortModel } from "./api";
 import { Avatar, MOOD_WORDS, MOODS, Mood } from "./Avatar";
@@ -363,6 +364,54 @@ type Memory = {
   source: string | null; // "<thread>/<run>" when learned from a chat
 };
 
+type Reflection = { id: string; content: string; source: string; created_at: string } | null;
+
+/** The living read Riki keeps on you: shown, editable, and your wording is treated as ground truth from then on. */
+function ReadOnYou({ me }: { me: Me }) {
+  const [r, setR] = useState<Reflection | undefined>(undefined);
+  const [draft, setDraft] = useState<string | null>(null);
+  useEffect(() => {
+    api<Reflection>("/reflection").then(setR).catch(() => setR(null));
+  }, []);
+  if (r === undefined) return null;
+  async function save() {
+    if (draft == null) return;
+    try {
+      setR(await put<Reflection>("/reflection", { content: draft }));
+      setDraft(null);
+      toast("Saved. Your wording is kept from now on.");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : String(e), "error");
+    }
+  }
+  return (
+    <section className="read-on-you" aria-label={`${me.agent_name}'s read on you`}>
+      <div className="row-head">
+        <strong>{me.agent_name}'s read on you</strong>
+        {r && <span className="muted small">{r.source === "edit" ? "your wording" : `updated ${ago(r.created_at)}`}</span>}
+      </div>
+      {draft != null ? (
+        <>
+          <textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={10} aria-label="Edit the read" />
+          <div className="row">
+            <button className="primary" onClick={save}>Save</button>
+            <button onClick={() => setDraft(null)}>Cancel</button>
+          </div>
+        </>
+      ) : r ? (
+        <>
+          <div className="reply">
+            <ReactMarkdown>{r.content}</ReactMarkdown>
+          </div>
+          <button className="link small" onClick={() => setDraft(r.content)}>That's not right: edit it</button>
+        </>
+      ) : (
+        <p className="muted small">{me.agent_name} writes this once it remembers a few things about you. You can correct it here.</p>
+      )}
+    </section>
+  );
+}
+
 export function MemoryPage({ me, onOpenThread }: { me: Me; onOpenThread: (id: string) => void }) {
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const [items, setItems] = useState<Memory[] | null>(null);
@@ -400,6 +449,7 @@ export function MemoryPage({ me, onOpenThread }: { me: Me; onOpenThread: (id: st
       title="Memory"
       lead={`Everything ${me.agent_name} remembers about you, where it learned it, and when. Correct anything that's wrong; forget anything you'd rather it didn't keep.`}
     >
+      <ReadOnYou me={me} />
       <form
         className="search"
         onSubmit={(e) => {

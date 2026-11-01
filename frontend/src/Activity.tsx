@@ -5,7 +5,7 @@ import { Check, ChevronDown, CircleAlert, Minus, X } from "lucide-react";
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ApprovalReq, RunRow, Span, post, seconds, shortModel } from "./api";
+import { ApprovalReq, RunRow, Span, dollars, post, seconds, shortModel } from "./api";
 import { TraceTree, pretty } from "./Trace";
 
 const arg = (s: Span, key: string) => {
@@ -57,7 +57,7 @@ const ICON: Record<string, JSX.Element | null> = {
 };
 
 /** Layer 2: the steps behind a reply, readable without knowing what a span is. */
-export function Steps({ spans, latency, onDetails, defaultOpen = false }: { spans: Span[]; latency?: number | null; onDetails: () => void; defaultOpen?: boolean }) {
+export function Steps({ spans, latency, cost, onDetails, defaultOpen = false }: { spans: Span[]; latency?: number | null; cost?: number | null; onDetails: () => void; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
   const agents = new Set(spans.filter((s) => s.kind === "agent").map((s) => s.id));
   const depthOf = (s: Span) => {
@@ -74,7 +74,7 @@ export function Steps({ spans, latency, onDetails, defaultOpen = false }: { span
   const problems = steps.filter((s) => s.status === "error" || s.status === "denied").length;
   if (!steps.length && agents.size === 0) return null;
   // One quiet line; the detail is one click away.
-  const head = latency == null ? "Working" : `Worked for ${seconds(latency)}`;
+  const head = latency == null ? "Working" : `Worked for ${seconds(latency)}${cost != null ? ` · ${dollars(cost)}` : ""}`;
   const extra = [helpers ? `with ${helpers} helper${helpers === 1 ? "" : "s"}` : "", problems ? `${problems} not done` : ""]
     .filter(Boolean)
     .join(", ");
@@ -241,6 +241,7 @@ export function RunDrawer(props: {
 const RISK_NOTE: Record<string, string> = {
   write: "This changes something outside the chat, so it needs your OK.",
   external: "This would reach another person. It is always blocked.",
+  money: "This moves money, so it always asks, every time.",
 };
 
 
@@ -268,10 +269,12 @@ export function ApprovalCard({ approval, agentName, onDecided, compact }: {
   const [showArgs, setShowArgs] = useState(false);
   const action = intent(approval.tool, (approval.args ?? {}) as Record<string, unknown>);
   const [error, setError] = useState("");
-  const decide = async (approve: boolean) => {
+  const asking = approval.tool === "ask_user";
+  const question = asking ? ((approval.args ?? {}) as { question?: string; options?: string[] }) : null;
+  const decide = async (approve: boolean, extra: { grant?: boolean; answer?: string } = {}) => {
     setState("busy");
     try {
-      await post(`/approvals/${approval.id}`, { approve });
+      await post(`/approvals/${approval.id}`, { approve, ...extra });
       setState(approve ? "allowed" : "denied");
       onDecided?.(approve);
     } catch (e) {
@@ -279,13 +282,36 @@ export function ApprovalCard({ approval, agentName, onDecided, compact }: {
       setState("open");
     }
   };
+  if (question) {
+    return (
+      <div className={`approval ${compact ? "compact" : ""}`} role="group" aria-label="A question from Riki">
+        <p className="approval-title">{question.question}</p>
+        {state === "allowed" || state === "denied" ? (
+          <p className={`approval-done ${state}`}>{state === "allowed" ? "Answered" : "Skipped"}</p>
+        ) : (
+          <div className="row wrap">
+            {(question.options ?? []).map((o) => (
+              <button key={o} className="primary" disabled={state === "busy"} onClick={() => decide(true, { answer: o })}>
+                {o}
+              </button>
+            ))}
+            <button disabled={state === "busy"} onClick={() => decide(false)}>
+              Skip
+            </button>
+          </div>
+        )}
+        {error && <p className="notice error">{error}</p>}
+      </div>
+    );
+  }
   return (
     <div className={`approval ${compact ? "compact" : ""}`} role="group" aria-label={`Approval for ${approval.tool}`}>
       <p className="approval-title">
         {agentName} wants to <b>{action.charAt(0).toLowerCase() + action.slice(1)}</b>
       </p>
       {!compact && approval.request && <p className="approval-context">You asked: “{approval.request}”</p>}
-      {!compact && <p className="approval-note">{RISK_NOTE[approval.risk || "write"]}</p>}
+      {!compact && <p className="approval-note">{RISK_NOTE[approval.money ? "money" : approval.risk || "write"]}</p>}
+      {compact && approval.money && <p className="approval-note">{RISK_NOTE.money}</p>}
       <button className="link inline small" onClick={() => setShowArgs(!showArgs)} aria-expanded={showArgs}>
         {showArgs ? "Hide details" : "Show exactly what it will do"}
       </button>
@@ -300,6 +326,12 @@ export function ApprovalCard({ approval, agentName, onDecided, compact }: {
           <button disabled={state === "busy"} onClick={() => decide(false)}>
             Deny
           </button>
+          {!approval.money && approval.thread_id && (
+            <button className="link small" disabled={state === "busy"} onClick={() => decide(true, { grant: true })}
+                    title="Saves tapping through a long job. This chat only, never for anything that moves money.">
+              Allow for 30 min
+            </button>
+          )}
         </div>
       )}
       {error && <p className="notice error">{error}</p>}

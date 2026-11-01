@@ -1,5 +1,15 @@
 # Riki v2: implementation plan
 
+> **Status, 2026-11-01: phases 0 to 5 are built (not yet evaluated).** Deviations from the text below, on purpose:
+> - Durable runs use *replay with memoized writes* (approvals are database rows; a restarted run finds its row, an action
+>   that already ran returns its stored result) instead of the LangGraph Postgres checkpointer, which needs a different
+>   database driver on Windows and resume logic for every agent. Only runs waiting for you are resumed.
+> - The thinking cycle writes the new reflection itself (one think call, one act call); there is also a plain refresh
+>   after 10 new memories.
+> - A thumbs-down with a comment becomes a preference memory right away (no confirmation tap); you can see and delete it in Memory.
+> - Kite order tools are not forced to "external": they are money tools (always ask, never granted) and the app is read-only by default.
+> - `RIKI_PRICES` and `RIKI_DAILY_BUDGET_USD` must be set for the budget to count anything.
+
 Written 2026-10-31, on top of `RIKI_V1_vs_V2_REPORT.md`. It builds on v2's code as it is today (tables in `backend/app/db.py`, the graph in `agent/graph.py`, the policy in `agent/policy.py`) and follows v2's own `docs/RULES.md`: smallest complete change, safety in code, every unit of work is a span, every behavior change gets a test or an eval.
 
 Time estimates assume one focused person and are rough.

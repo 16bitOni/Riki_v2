@@ -29,6 +29,7 @@ export type ApprovalReq = {
   created_at?: string;
   decided_at?: string | null;
   thread_id?: string | null;
+  money?: boolean; // moves money: always asks, never "allow for 30 minutes"
 };
 
 export type Msg = {
@@ -40,6 +41,7 @@ export type Msg = {
   feedback?: number | null;
   error?: string | null; // why the run failed, if it did
   checks?: { unsupported?: string[]; invalid_citations?: string[] }; // fact check of the reply
+  cost_usd?: number | null;
   created_at?: string;
 };
 
@@ -175,6 +177,24 @@ export async function api<T = unknown>(path: string, init: RequestInit = {}): Pr
     throw Object.assign(new Error(typeof detail === "string" ? detail.slice(0, 300) : `Request failed (${res.status})`), { status: res.status });
   }
   return res.json() as Promise<T>;
+}
+
+export const dollars = (n?: number | null) => (n == null ? "" : n >= 1 ? `$${n.toFixed(2)}` : `$${n.toFixed(4)}`);
+
+/** A file to talk about (PDF, Word, Excel, CSV, text): sent as is, read by Riki with read_file. */
+export async function upload(file: File): Promise<{ id: string; name: string; chars: number; lines: number }> {
+  const res = await fetch(`/api/uploads?name=${encodeURIComponent(file.name)}`, { method: "POST", body: file, credentials: "same-origin" });
+  if (res.status === 401) throw new Unauthorized();
+  if (!res.ok) {
+    let detail = await res.text();
+    try {
+      detail = JSON.parse(detail).detail ?? detail;
+    } catch {
+      /* not JSON */
+    }
+    throw new Error(typeof detail === "string" ? detail.slice(0, 200) : `Upload failed (${res.status})`);
+  }
+  return res.json();
 }
 
 export const post = <T = unknown>(path: string, body: unknown) =>

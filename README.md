@@ -18,6 +18,12 @@ and shows its working for every answer.
   from real chats.
 - **Lean.** Built-in + MCP tools are listed in a one-line catalog and loaded on demand; prompts are
   byte-stable for prompt caching; sub-agent chatter never enters the main context.
+- **Knows you, and tells you.** A living read on you (Memory tab, editable), lessons drawn from how chats went, and a
+  thinking cycle that may end in one specific message. Reminders and scheduled tasks. All of it checks for new input first,
+  so a quiet day costs nothing.
+- **Reachable.** Telegram (your one chat): talk to Riki, tap Allow or Deny, answer its questions. A change waiting for you
+  survives a restart and is never done twice. "Allow for 30 minutes" for long jobs; never for anything that moves money.
+- **Costs in view.** Every answer shows its time and cost; a daily budget pauses background work and then shortens answers.
 
 ## The app
 
@@ -109,6 +115,9 @@ Changing the embedding model is safe: riki-mem keeps vectors per model; run its 
 backfill.
 
 ## Tools
+
+Also built in: `ask_user` (one question with tappable choices), `read_file` (PDF, Word, Excel, CSV, text you attach),
+`schedule` / `list_schedules` / `cancel_schedule`, and `run_python` when `RIKI_SANDBOX=true`.
 
 Built in: `current_time`, `web_search` (Tavily once you connect it in Apps, DuckDuckGo until then),
 `fetch_url` (public pages only), `recall_memory`, `remember`, `spawn_agent`, `load_tools`, `connect_app`.

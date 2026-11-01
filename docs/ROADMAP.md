@@ -3,7 +3,15 @@
 Where Riki v2 is (October 2026), what stops it from doing real work end to end, and the order to fix that in.
 Each item names the code it touches, so it can start as a small change.
 
-## Where it stands
+## Status (2026-11-01)
+
+Built since this page was written: approvals as database rows that survive a restart (a waiting request is resumed and an
+action that already ran is not run twice), `ask_user`, "allow for 30 minutes" grants, a money rule, the taint gate on
+`remember`, reminders and scheduled tasks, Telegram, file uploads with `read_file`, an optional Docker sandbox, a living
+read on you with lessons and a nudge cycle, cost per answer and a daily budget. Still open: a visible plan checklist,
+a desktop bridge, and a task suite (10 vague multi-step requests with a rubric) to measure whether Riki finishes work.
+
+## Where it stood
 
 Strong already: risk tiers enforced in code, nested sub-agents with budgets, full traces, citation and grounding
 checks, evals with pass^k, ~30 apps through MCP, artifacts (Markdown, designed pages, PDF), check-ins, and now
