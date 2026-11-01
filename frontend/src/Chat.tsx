@@ -1,4 +1,4 @@
-import { ArrowUp, ChevronDown, Copy, Gauge, Mic, PanelRight, Paperclip, Sparkles, Square, ThumbsDown, ThumbsUp, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronDown, Copy, Gauge, Mic, PanelRight, Paperclip, Sparkles, Square, ThumbsDown, ThumbsUp, Trash2 } from "lucide-react";
 import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import { Reply, RunDrawer, Steps, liveLine } from "./Activity";
 import { ArtifactCard, ArtifactView } from "./Artifacts";
@@ -110,7 +110,11 @@ export function Chat(props: {
   const list = useRef<HTMLDivElement>(null); // the scrolling message list
   const dock = useRef<HTMLDivElement>(null); // the floating input bar
   const seen = useRef(0); // messages at the last scroll: a history that just loaded jumps, new ones glide
-  const pinned = useRef(true); // you're at the bottom: a growing reply keeps it in view; scroll up and it stops
+  // Reading while it writes: sending brings your message to the top, and the reply grows under it without moving the
+  // page. Nothing follows the tokens; "below" shows a pill that brings you to the end when you want it.
+  const anchor = useRef<string | null>(null); // the message you just sent
+  const [turnMin, setTurnMin] = useState(0); // room under it, so it can sit at the top even before the reply is long
+  const [below, setBelow] = useState(false); // the reply goes on past the input bar
   const freshStep = useRef(false); // a new model step started: its first token replaces the previous step's text
   // Scroll the list itself: scrollIntoView would also move the overflow:hidden page around it.
   const toBottom = (smooth = true) =>
@@ -153,16 +157,39 @@ export function Chat(props: {
     [],
   );
 
+  /** Where the reply's text ends (not the empty room under it), measured against the visible area above the input bar. */
+  const contentEnd = () => {
+    const el = list.current;
+    const all = el?.querySelectorAll(".msg");
+    const last = all?.[all.length - 1];
+    const end = (last?.lastElementChild ?? last)?.getBoundingClientRect().bottom;
+    if (!el || end == null) return 0;
+    return end - (el.getBoundingClientRect().bottom - (dock.current?.offsetHeight ?? 0) - 16);
+  };
+  const checkBelow = () => setBelow(contentEnd() > 24);
+  const toLatest = () => list.current?.scrollBy({ top: contentEnd(), behavior: "smooth" });
+
   useEffect(() => {
     if (messages.length !== seen.current) {
-      pinned.current = true; // your own new message always comes into view
-      toBottom(seen.current > 0);
-    } else if (pinned.current) toBottom(false); // a smooth scroll per token would stutter
+      const el = list.current;
+      const mine = anchor.current && el?.querySelector<HTMLElement>(`[data-id="${anchor.current}"]`);
+      if (el && mine) {
+        // your message to the top, under the chat title; the reply has room to grow below it
+        const head = el.querySelector<HTMLElement>(".chat-head")?.offsetHeight ?? 0;
+        const top = el.scrollTop + mine.getBoundingClientRect().top - el.getBoundingClientRect().top - head - 16;
+        setTurnMin(Math.max(0, el.clientHeight - head - 16 - mine.offsetHeight - 32 - (dock.current?.offsetHeight ?? 0) - 38));
+        // two frames: the room under it is rendered before scrolling, or the scroll would stop short
+        requestAnimationFrame(() => requestAnimationFrame(() => el.scrollTo({ top, behavior: "smooth" })));
+        anchor.current = null;
+      } else {
+        setTurnMin(0);
+        toBottom(seen.current > 0);
+      }
+    }
     seen.current = messages.length;
+    checkBelow();
   }, [messages, live.spans.length]);
-  const keepInView = () => {
-    if (pinned.current) toBottom(false);
-  };
+  const keepInView = checkBelow; // a growing reply never moves the page
 
   useAutoGrow(input, draft); // pinned to the bottom of the chat, so it grows upward like ChatGPT's
 
@@ -339,9 +366,11 @@ export function Chat(props: {
     setDocs([]);
     setError("");
     setLive({ spans: [], approvals: [], runId: null });
+    const mine = crypto.randomUUID();
+    anchor.current = mine;
     setMessages((m) => [
       ...m,
-      { id: crypto.randomUUID(), role: "user", content: text, images },
+      { id: mine, role: "user", content: text, images },
       { id: crypto.randomUUID(), role: "assistant", content: "" },
     ]);
     try {
@@ -419,10 +448,7 @@ export function Chat(props: {
           className="messages"
           aria-live="polite"
           ref={list}
-          onScroll={(e) => {
-            const el = e.currentTarget;
-            pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
-          }}
+          onScroll={checkBelow}
         >
           <div className="column">
             <div className="chat-head">
@@ -467,7 +493,7 @@ export function Chat(props: {
               const isLive = busy && i === messages.length - 1;
               if (m.role === "user")
                 return (
-                  <div key={m.id} className="msg user">
+                  <div key={m.id} className="msg user" data-id={m.id}>
                     {m.images?.length ? (
                       <div className="attachments">
                         {m.images.map((src, k) => (
@@ -491,7 +517,7 @@ export function Chat(props: {
                   </div>
                 );
               return (
-                <div key={m.id} className={`msg assistant ${isLive ? "live" : ""}`}>
+                <div key={m.id} className={`msg assistant ${isLive ? "live" : ""}`} style={i === messages.length - 1 && turnMin ? { minHeight: turnMin } : undefined}>
                   {m.content ? (
                     <SmoothReply text={m.content} onCite={(ref) => m.run_id && openDetail(m.run_id, ref)} onGrow={keepInView} />
                   ) : (
@@ -558,6 +584,11 @@ export function Chat(props: {
         </div>
 
         <div className="dock" ref={dock}>
+          {below && (
+            <button className="jump" onClick={toLatest}>
+              <ArrowDown size={14} aria-hidden="true" /> Latest
+            </button>
+          )}
           {error && (
             <p className="field-error" role="alert">
               {error}

@@ -29,11 +29,11 @@ h2.first + .settings-group, .settings-group > h2.first { margin-left: 0; }
 .switch.on::after { transform: translateX(18px); }
 
 .channel { background: var(--smoke); border-radius: 20px; padding: 18px; display: flex; flex-direction: column; gap: 14px; box-shadow: inset 0 0 0 1px transparent; transition: box-shadow 0.3s; }
-.channel.on { box-shadow: inset 0 0 0 1px rgba(48, 209, 88, 0.35); }
-.channel.pairing { box-shadow: inset 0 0 0 1px rgba(255, 159, 10, 0.4); }
+.channel.on { box-shadow: inset 0 0 0 1px rgba(95, 201, 146, 0.3); }
+.channel.pairing { box-shadow: inset 0 0 0 1px rgba(255, 194, 51, 0.35); }
 .channel-head { display: flex; align-items: center; gap: 14px; }
 .channel-head h3 { --fs: 17; }
-.channel-icon { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; background: #229ed9; color: #fff; flex: none; }
+.channel-icon { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; background: var(--smoke); color: var(--focus); box-shadow: inset 0 0 0 1px var(--hairline-2); flex: none; }
 .channel-body { display: flex; flex-direction: column; gap: 14px; border-top: 1px solid var(--hairline); padding-top: 14px; }
 .steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; color: var(--silver); }
 .steps a { display: inline-flex; align-items: center; gap: 3px; }
@@ -81,7 +81,7 @@ h2.first + .settings-group, .settings-group > h2.first { margin-left: 0; }
 .scope { position: relative; }
 .scope-n { position: absolute; top: 14px; right: 16px; --fs: 22; font-weight: 600; color: var(--silver); font-variant-numeric: tabular-nums; }
 
-.chat-row-icon { flex: none; width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: #229ed9; color: #fff; margin: 0 -2px 0 0; align-self: center; }
+.chat-row-icon { flex: none; width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: var(--smoke); color: var(--focus); box-shadow: inset 0 0 0 1px var(--hairline-2); margin: 0 -2px 0 0; align-self: center; }
 .chat-row.tg .chat-row-open { flex-direction: row; align-items: center; gap: 12px; }
 .chat-row.tg .chat-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .chat-cta { margin-top: 16px; }
