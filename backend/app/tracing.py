@@ -87,6 +87,8 @@ class RunContext:
     run_id: str
     source: str = "chat"  # "eval" auto-denies every approval
     memory_user: str = ""  # memory namespace for this run (evals use their own)
+    user_id: str = ""  # whose run (empty: the owner's)
+    member: bool = False  # not the owner: no connected apps, files or sandbox, a neutral persona
     thread_id: str | None = None
     effort: str = "high"  # config.EFFORT level; caps depth, helpers, steps and tokens for this run
     # Every event so far, so a client that navigated away, refreshed or lost its connection can replay the

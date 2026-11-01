@@ -19,10 +19,11 @@ from .apps import CATALOG, Apps
 from .agent.mcp import load_mcp
 from .agent import policy
 from .agent.policy import expire_stale
-from .agent.prompts import PROMPT_VERSION, TEMPLATES, main_prompt, persona_version, sub_prompt
+from .agent.prompts import MEMBER_NOTE, PROMPT_VERSION, TEMPLATES, main_prompt, persona_version, sub_prompt
 from .agent.tools import ToolRegistry, builtin_tools
 from .config import BACKEND_DIR, Settings
 from .db import Database, Persona, PromptVersion, utcnow
+from .users import ensure_owner
 from .memory import LangChainProvider
 from .files import file_tools
 from .ops import heartbeat_loop, interrupt_stale_runs, resume_waiting_runs
@@ -80,12 +81,14 @@ class Runtime:
         self.telegram = None  # the phone channel, once a bot is connected (in the app, or by RIKI_TELEGRAM_* once)
         self.telegram_problem = ""  # why a saved connection could not be opened
         self.defaults: dict = {}  # what .env gave for the settings the app can change
+        self._member_prompts: dict = {}  # (name, sub) -> prompt: a member's Riki, built on first use
 
     async def start(self) -> None:
         s = self.settings
         policy.SHUTTING_DOWN = False
-        self.db = Database(s.database_url)
+        self.db = Database(s.database_url, s.user_id)
         await self._check_schema()
+        await ensure_owner(self)
         self.defaults = snapshot_defaults(s)
         await load_overrides(self)  # what you changed in Settings wins over .env
         self.models = self._models or {"fast": _model(s.model, s), "smart": _model(s.smart_model, s)}
@@ -222,6 +225,22 @@ class Runtime:
         self.sub_system = sub_prompt(s.user_name, self.registry.catalog(exclude={*SUB_AGENT_BASE_TOOLS, "connect_app"}),
                                      persona.name)
         return persona
+
+    def system_for(self, ctx, name: str | None, *, sub: bool = False) -> str:
+        """The system prompt for this run. The owner's are built once (reload_persona). A member's is a neutral Riki that
+        knows their name, not the owner's persona, and lists none of the owner's apps or tools."""
+        if ctx is None or not ctx.member:
+            return self.sub_system if sub else self.main_system
+        who_ = name or ""
+        key = (who_, sub)
+        if key not in self._member_prompts:
+            core = set(self.settings.core_tools)
+            if sub:
+                text = sub_prompt(who_, self.registry.catalog(exclude={*SUB_AGENT_BASE_TOOLS, "connect_app"}, members=True), "Riki")
+            else:
+                text = main_prompt(who_, self.registry.catalog(exclude=core, members=True), "Riki", "", "", "")
+            self._member_prompts[key] = text + MEMBER_NOTE.format(name=who_)
+        return self._member_prompts[key]
 
     async def _check_schema(self) -> None:
         """Refuse to run against a database the code doesn't match (fail fast, not mid-chat)."""

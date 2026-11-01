@@ -8,6 +8,11 @@ by anything it reads, so it is never the thing that decides what is allowed.
 | Threat | Control | Where |
 |---|---|---|
 | Someone else uses your Riki | Password login (min 12 chars), httpOnly + SameSite=Strict cookie, 1 s delay on wrong password, binds to 127.0.0.1 | `main.py`, `config.py` |
+| Someone else signs in (email mode) | A 6-digit code mailed only to an address that has an account (the owner's `RIKI_OWNER_EMAIL`, or a person the owner added): single use, 10 minutes, dies after 5 wrong tries, at most 1 per 30 s and 5 per hour per person; the same answer for any address; the code is stored as an HMAC. A remembered browser is a random token (only its hash is stored, tied to one person), revoked on sign-out, by "Sign out everywhere", when the person is paused or removed, or after 90 days unused. Password login is switched off while email mode is on | `main.login_code`, `login_verify`, `_signed_in`, `mailer.py`, tests `test_email_login.py` |
+| One person reads or changes another's chats, runs, files or approvals | Every table holding a person's data has a `user_id` the database fills in, and Postgres row-level security shows a session only its own person's rows. Sessions run as the restricted role `riki_app`; a query that forgets a filter still sees nothing of anyone else's, and a forged `user_id` is refused. Only sign-in and user management use the unrestricted ("system") view | alembic `0014`, `db.Database.session`, `tenancy.py`, tests `test_members.py` |
+| A member reaches the owner's apps, files, settings or settings-level data | Default-deny: an endpoint is owner-only (`Auth`) unless it is deliberately opened (`AnyUser`); the owner's connected apps, MCP servers (files), the code sandbox and scheduled tasks are never offered to a member's run and are refused if the model names them anyway; a member's Riki is neutral (no owner persona, no owner apps in its prompt) | `main.require_owner`, `tools.blocked_for_member`, `graph.offerable`, `runtime.system_for` |
+| A member's memory mixes with the owner's | Each person's memory is its own riki-mem namespace (their id); a removed person's namespace is deleted with them | `turn.start_run`, `main._uid`, `main.remove_user` |
+| One member runs up the model bill | A daily cap per member (`RIKI_MEMBER_DAILY_BUDGET_USD`, default $1); it only counts runs with a price, so set `RIKI_PRICES` | `spend.budget_state` |
 | Prompt injection (web page, file, email, stored memory tells the model to act) | Risk tiers in code: writes need your approval, external actions never run; prompt marks tool output as data | `agent/policy.py`, `prompts.py` |
 | Riki messages people on your behalf | `external` tier is never offered and always refused | `policy.py`, `mcp.json` `external_tools` |
 | Data exfiltration through a tool | Uploads are `external`; writes need approval; `fetch_url` only reaches public addresses | `mcp.json`, `tools.assert_public_url` |
@@ -75,3 +80,18 @@ by anything it reads, so it is never the thing that decides what is allowed.
 1. Decide its tier honestly: does it read, change something, or reach another person?
 2. Put reads in `safe_tools`, anything that reaches people in `external_tools`; leave the rest as write.
 3. Add an eval case if the tool creates a new way to go wrong.
+
+## Several people on one Riki: what is and is not covered
+
+Built: invited people (email codes), private chats, runs, files, approvals and memory, a spending cap, owner-only settings,
+apps, files, sandbox, Telegram, check-ins and schedules.
+
+Limits to know:
+- Isolation of the app's own tables is enforced by the database. riki-mem's tables are not row-level secured: its API is
+  namespaced per person, but anything with raw database access can read all memory.
+- `riki_app` is created by migration 0014 and needs `CREATEROLE` (or a superuser) on the connecting database user.
+- The owner's persona, models, quiet hours, time zone and the one Telegram phone belong to the owner; members share the server
+  time zone and a neutral Riki. Per-person versions of these are not built.
+- Members cannot connect their own apps yet: connected apps are one set of tools per server, so they stay the owner's.
+- Open sign-up is not built. It needs a per-IP rate limit and abuse protection first (see the shortcut note in `main.py`).
+- Costs are shared: one model key. Without `RIKI_PRICES` nothing is priced, so no cap can trip.

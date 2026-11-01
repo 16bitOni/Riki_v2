@@ -3,11 +3,13 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text, event, text
 from sqlalchemy import false as sa_false
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, declared_attr, mapped_column
+
+from .tenancy import who
 
 
 def new_id() -> str:
@@ -22,7 +24,30 @@ class Base(DeclarativeBase):
     pass
 
 
-class Thread(Base):
+class User(Base):
+    """Someone who can sign in. The owner is created at start from RIKI_OWNER_EMAIL; members are invited by the owner."""
+
+    __tablename__ = "people"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    email: Mapped[str] = mapped_column(String(254), unique=True)  # lower case
+    name: Mapped[str] = mapped_column(String(80))
+    role: Mapped[str] = mapped_column(String(8), default="member", server_default="member")  # owner | member
+    disabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
+    login: Mapped[dict | None] = mapped_column(JSONB)  # the sign-in code in flight: {hash, expires, tries, sent}
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Owned:
+    """Whose row this is. The database fills it in from the session's user, and Postgres row-level security only ever
+    shows a session its own rows (see alembic 0014), so a query that forgets a filter still cannot see someone else's."""
+
+    @declared_attr
+    def user_id(cls) -> Mapped[str]:
+        return mapped_column(String(32), ForeignKey("people.id", ondelete="CASCADE"),
+                             server_default=text("current_setting('riki.user_id', true)"))
+
+
+class Thread(Owned, Base):
     __tablename__ = "threads"
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     title: Mapped[str] = mapped_column(String(200), default="New chat")
@@ -31,7 +56,7 @@ class Thread(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
-class Message(Base):
+class Message(Owned, Base):
     """Only user text and final answers. Tool chatter lives in spans, so it never re-enters context."""
 
     __tablename__ = "messages"
@@ -44,7 +69,7 @@ class Message(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
 
 
-class Artifact(Base):
+class Artifact(Owned, Base):
     """A file Riki made to keep: a Markdown document (md) or a designed HTML page (html, saved as PDF)."""
 
     __tablename__ = "artifacts"
@@ -59,7 +84,7 @@ class Artifact(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
-class Run(Base):
+class Run(Owned, Base):
     __tablename__ = "runs"
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     thread_id: Mapped[str | None] = mapped_column(ForeignKey("threads.id", ondelete="SET NULL"), index=True)
@@ -81,7 +106,7 @@ class Run(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
 
 
-class Span(Base):
+class Span(Owned, Base):
     """One node of the run tree: agent, llm call, tool call or memory lookup."""
 
     __tablename__ = "spans"
@@ -103,7 +128,7 @@ class Span(Base):
     ended_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
-class Approval(Base):
+class Approval(Owned, Base):
     __tablename__ = "approvals"
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     run_id: Mapped[str] = mapped_column(String(32), index=True)
@@ -123,7 +148,7 @@ class Approval(Base):
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
-class ApprovalGrant(Base):
+class ApprovalGrant(Owned, Base):
     """"Allow this tool for 30 minutes in this chat": saves tapping through a 20-step job. Never for money or people."""
 
     __tablename__ = "approval_grants"
@@ -134,7 +159,7 @@ class ApprovalGrant(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
-class Reflection(Base):
+class Reflection(Owned, Base):
     """Riki's living read on you. Each version is kept; the newest is injected into prompts and shown in Memory."""
 
     __tablename__ = "reflections"
@@ -147,7 +172,7 @@ class Reflection(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
 
 
-class Schedule(Base):
+class Schedule(Owned, Base):
     """A reminder (just tells you) or a task (a read-only run whose result tells you), once or repeating."""
 
     __tablename__ = "schedules"
@@ -162,7 +187,7 @@ class Schedule(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
-class AppSetting(Base):
+class AppSetting(Owned, Base):
     """Settings changed in the app (they win over the environment), and the Telegram connection (token encrypted)."""
 
     __tablename__ = "app_settings"
@@ -171,7 +196,17 @@ class AppSetting(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
-class Nudge(Base):
+class Device(Base):
+    """A browser that signed in with an emailed code and is remembered. Only the hash of its cookie is stored."""
+
+    __tablename__ = "devices"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)  # sha256 of the cookie token
+    user_id: Mapped[str] = mapped_column(ForeignKey("people.id", ondelete="CASCADE"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Nudge(Owned, Base):
     """A message Riki sent on its own initiative, with how you reacted (this is what teaches it when to stay quiet)."""
 
     __tablename__ = "nudges"
@@ -184,7 +219,7 @@ class Nudge(Base):
     reaction: Mapped[str | None] = mapped_column(String(8))  # replied | ignored (set later)
 
 
-class Feedback(Base):
+class Feedback(Owned, Base):
     __tablename__ = "feedback"
     run_id: Mapped[str] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), primary_key=True)
     score: Mapped[int] = mapped_column(Integer)  # +1 / -1
@@ -216,7 +251,7 @@ class PromptVersion(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
-class Persona(Base):
+class Persona(Owned, Base):
     """Single row (id=1): who Riki is, written by the user. Part of the system prompt."""
 
     __tablename__ = "persona"
@@ -233,7 +268,7 @@ class Persona(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
-class Connection(Base):
+class Connection(Owned, Base):
     """An app you connected (Notion, Gmail, Zerodha...). Listed apps take name/url/auth from apps.json."""
 
     __tablename__ = "connections"
@@ -248,10 +283,35 @@ class Connection(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class _Scoped(Session):
+    """A session that, when it has a person, runs as the restricted role with that person's id (row-level security)."""
+
+
+@event.listens_for(_Scoped, "after_begin")
+def _scope(session, _transaction, connection) -> None:
+    uid = session.info.get("uid")
+    if uid is not None:  # SET LOCAL: gone at commit or rollback, so a pooled connection never keeps it
+        # Pin the schema first: the default search_path starts with "$user", which stops meaning the app's schema
+        # the moment the role changes.
+        connection.execute(text("SELECT set_config('search_path', current_schema() || ',public', true)"))
+        connection.execute(text("SET LOCAL ROLE riki_app"))
+        connection.execute(text("SELECT set_config('riki.user_id', :u, true)"), {"u": uid})
+
+
 class Database:
-    def __init__(self, url: str) -> None:
+    def __init__(self, url: str, owner_id: str = "me") -> None:
         self.engine = create_async_engine(url, pool_pre_ping=True)
-        self.session: async_sessionmaker[AsyncSession] = async_sessionmaker(self.engine, expire_on_commit=False)
+        self.owner_id = owner_id
+        self._factory: async_sessionmaker[AsyncSession] = async_sessionmaker(self.engine, expire_on_commit=False,
+                                                                           sync_session_class=_Scoped)
+
+    def session(self, *, system: bool = False) -> AsyncSession:
+        """A session for the person making this request. With nobody signed in (a background job, Telegram, the heartbeat)
+        it is the owner's. ``system=True`` sees every person's rows: only for sign-in, user management and start-up."""
+        s = self._factory()
+        person = who()
+        s.sync_session.info["uid"] = None if system else (person.id if person else self.owner_id)
+        return s
 
     async def close(self) -> None:
         await self.engine.dispose()

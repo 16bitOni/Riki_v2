@@ -1,6 +1,6 @@
 // Home: one windshield for the day. Activity: everything done on your behalf.
 
-import { ArrowUp, Brain, Check, CircleAlert, History, Minus, Plus, Search, ShieldCheck, Trash2 } from "lucide-react";
+import { ArrowUp, Brain, Check, WarningCircle as CircleAlert, ClockCounterClockwise as History, Minus, Plus, MagnifyingGlass as Search, ShieldCheck, Trash as Trash2 } from "@phosphor-icons/react";
 import { FormEvent, useRef, useState } from "react";
 import { Reply, describe } from "./Activity";
 import { Me, Span, Thread, Today, ago } from "./api";
@@ -24,9 +24,11 @@ export function ThreadRow({ t, on, onOpen, onDelete }: { t: Thread; on?: boolean
         )}
       </button>
       {onDelete && (
-        <button className="icon small card-row-del" aria-label={t.kind === "main" ? "Clear this chat" : "Delete this chat"} title={t.kind === "main" ? "Clear" : "Delete"} onClick={onDelete}>
-          <Trash2 size={14} />
-        </button>
+        <span className="chat-row-actions">
+          <button className="icon small" aria-label={t.kind === "main" ? "Clear this chat" : "Delete this chat"} title={t.kind === "main" ? "Clear" : "Delete"} onClick={onDelete}>
+            <Trash2 size={14} />
+          </button>
+        </span>
       )}
     </div>
   );
@@ -94,7 +96,7 @@ export function HomePage(props: {
             <Plus size={18} />
           </button>
           <button className="send" disabled={!draft.trim()} aria-label="Send">
-            <ArrowUp size={18} strokeWidth={2.25} />
+            <ArrowUp size={18} />
           </button>
         </form>
         {fresh && <p className="muted small home-target">This will start a new chat.</p>}
@@ -143,24 +145,26 @@ export function HomePage(props: {
               )}
             </section>
 
-            <section className="panel">
-              <h2>From today's check-in</h2>
-              {data.nudge?.text ? (
-                <>
-                  <Reply text={data.nudge.text} />
-                  <p className="meta">
-                    <span>{ago(data.nudge.at)}</span>
+            {me.account === "owner" && (
+              <section className="panel tint">
+                <h2>From today's check-in</h2>
+                {data.nudge?.text ? (
+                  <>
+                    <Reply text={data.nudge.text} />
+                    <p className="meta">
+                      <span>{ago(data.nudge.at)}</span>
+                    </p>
+                  </>
+                ) : (
+                  <p className="muted">
+                    No check-in today.{" "}
+                    <button className="link inline" onClick={() => props.onGo("Settings")}>
+                      Set up check-ins
+                    </button>
                   </p>
-                </>
-              ) : (
-                <p className="muted">
-                  No check-in today.{" "}
-                  <button className="link inline" onClick={() => props.onGo("Settings")}>
-                    Set up check-ins
-                  </button>
-                </p>
-              )}
-            </section>
+                )}
+              </section>
+            )}
 
             <section className="panel">
               <h2>Learned today</h2>

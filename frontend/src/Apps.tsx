@@ -1,6 +1,6 @@
 // Apps: connect the accounts you use. Riki reads on its own, asks before changing anything, never sends.
 
-import { Check, ChevronRight, ExternalLink, Link2, Search } from "lucide-react";
+import { Check, CaretRight as ChevronRight, ArrowSquareOut as ExternalLink, Link as Link2, MagnifyingGlass as Search } from "@phosphor-icons/react";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import {
   siAirtable, siAsana, siAtlassian, siBox, siGithub, siGmail, siGooglecalendar, siGoogledocs, siGoogledrive,
@@ -86,7 +86,7 @@ export function Tile({ app, onOpen }: { app: App; onOpen: () => void }) {
       </span>
       {app.connected ? (
         <span className={`app-tile-state ${STATE[app.state][0]}`}>
-          {app.state === "connected" ? <Check size={14} strokeWidth={2.5} aria-label="Connected" /> : <i className={`dot ${STATE[app.state][0]}`} aria-label={STATE[app.state][1]} />}
+          {app.state === "connected" ? <Check size={14} aria-label="Connected" /> : <i className={`dot ${STATE[app.state][0]}`} aria-label={STATE[app.state][1]} />}
         </span>
       ) : (
         <span className="app-get">Connect</span>
@@ -310,7 +310,7 @@ export function ConnectCard({ appId, reason, onOpenApps, onShown }: { appId: str
           <strong>{done ? `${app.name} is connected` : `Connect ${app.name}`}</strong>
           <p className="small muted">{done ? "Ready to use." : (reason || app.blurb).slice(0, 160)}</p>
         </div>
-        {done && <Check size={18} strokeWidth={2.5} aria-hidden="true" />}
+        {done && <Check size={18} aria-hidden="true" />}
       </div>
       {!done && app.auth === "token" && (
         <form className="connect-form stack" onSubmit={connect}>

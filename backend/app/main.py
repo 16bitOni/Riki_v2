@@ -6,8 +6,9 @@ import hmac
 import json
 import logging
 import re
+import secrets
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -20,21 +21,24 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import delete, func, select, text
+from sqlalchemy.exc import IntegrityError
 
 from riki_memory import MemoryCreate
 
+from . import mailer, users
 from .agent import policy
 from .agent.prompts import ONBOARD
 from .apps import CATALOG, CATEGORIES, ROLES, search_directory
 from .cognition import feedback_lesson, latest_reflection, save_edit
 from .config import Effort, get_settings
-from .db import (Approval, ApprovalGrant, Artifact, Connection, EvalRun, Feedback, Message, Nudge, Persona, Run, Schedule,
-                 Span, Thread, new_id, utcnow)
+from .db import (Approval, ApprovalGrant, Artifact, Connection, Device, EvalRun, Feedback, Message, Nudge,
+                 Persona, Run, Schedule, Span, Thread, User, new_id, utcnow)
 from .files import Unreadable, save_upload
 from .ops import LOGS, beat, own_thread
 from .runtime import Runtime
 from .settings_store import SettingsPatch, save_patch, view as settings_view
 from .spend import budget_state, spend_today
+from .tenancy import Who, reset_who, set_who, who
 from .tracing import clean, scrub
 from .turn import ensure_thread, start_run
 
@@ -70,17 +74,68 @@ def rt_dep(request: Request) -> Runtime:
 
 
 def session_token(rt: Runtime) -> str:
-    # Derived from the password: changing the password logs every session out.
+    # Password mode only. Derived from the password: changing the password logs every session out.
     return hmac.new(rt.settings.password.get_secret_value().encode(), b"riki-session-v1", hashlib.sha256).hexdigest()
 
 
-def require_auth(request: Request, rt: Runtime = Depends(rt_dep)) -> Runtime:
-    if not hmac.compare_digest(request.cookies.get(COOKIE, ""), session_token(rt)):
-        raise HTTPException(401, "login required")
-    return rt
+def _digest(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
 
 
-Auth = Annotated[Runtime, Depends(require_auth)]
+DEVICE_IDLE = timedelta(days=90)  # a remembered browser unused this long has to sign in again
+COOKIE_LIFE = 365 * 86400  # the cookie outlives that on purpose: the server decides, and use keeps a device fresh
+
+
+async def _signed_in(request: Request, rt: Runtime) -> Who:
+    """Who is behind this cookie, or 401."""
+    token = request.cookies.get(COOKIE, "")
+    s = rt.settings
+    if not s.email_login:  # password mode: one person, the owner
+        if not hmac.compare_digest(token, session_token(rt)):
+            raise HTTPException(401, "login required")
+        return Who(s.user_id, "owner", s.user_name)
+    async with rt.db.session(system=True) as db:
+        device = await db.get(Device, _digest(token)) if token else None
+        if device is None or utcnow() - device.last_seen_at > DEVICE_IDLE:
+            raise HTTPException(401, "login required")
+        user = await db.get(User, device.user_id)
+        if user is None or user.disabled:
+            raise HTTPException(401, "login required")
+        if utcnow() - device.last_seen_at > timedelta(hours=1):  # at most one write an hour
+            device.last_seen_at = utcnow()
+            await db.commit()
+    return Who(user.id, user.role, user.name)
+
+
+async def require_user(request: Request, rt: Runtime = Depends(rt_dep)):
+    """Any signed-in person. From here on, this request's database sessions see only their rows (tenancy.py)."""
+    marker = set_who(await _signed_in(request, rt))
+    try:
+        yield rt
+    finally:
+        reset_who(marker)
+
+
+async def require_owner(request: Request, rt: Runtime = Depends(rt_dep)):
+    person = await _signed_in(request, rt)
+    if person.member:
+        raise HTTPException(403, "Only the owner can do this.")
+    marker = set_who(person)
+    try:
+        yield rt
+    finally:
+        reset_who(marker)
+
+
+# Default-deny: an endpoint is owner-only unless it says AnyUser, so a new or unreviewed one never opens to a member.
+Auth = Annotated[Runtime, Depends(require_owner)]
+AnyUser = Annotated[Runtime, Depends(require_user)]
+
+
+def _uid(rt: Runtime) -> str:
+    """The signed-in person's id: their memory namespace and their rows."""
+    person = who()
+    return person.id if person else rt.settings.user_id
 
 
 # --- auth -------------------------------------------------------------------------------------
@@ -89,8 +144,41 @@ class LoginIn(BaseModel):
     password: str = Field(max_length=200)
 
 
+class EmailIn(BaseModel):
+    email: str = Field(max_length=254)
+
+
+class VerifyIn(EmailIn):
+    code: str = Field(pattern=r"^[0-9]{6}$")
+
+
+CODE_TTL = timedelta(minutes=10)
+CODE_TRIES = 5  # wrong guesses a code survives
+CODE_GAP = timedelta(seconds=30)  # between two codes
+CODES_PER_HOUR = 5
+# shortcut: the request limit counts only requests for a known address, so a stranger cannot lock anyone out, but a 429
+# also tells them the address has an account. Fine for a handful of invited people; add a per-IP limit before open sign-up.
+
+
+def _email_mode(rt: Runtime) -> None:
+    if not rt.settings.email_login:
+        raise HTTPException(404, "email sign-in is not set up")
+
+
+def _code_hash(rt: Runtime, code: str) -> str:
+    key = rt.settings.password.get_secret_value().encode()
+    return hmac.new(key, b"riki-login-code-v1:" + code.encode(), hashlib.sha256).hexdigest()
+
+
+@app.get("/api/login/mode")
+async def login_mode(rt: Runtime = Depends(rt_dep)):
+    return {"email": rt.settings.email_login}
+
+
 @app.post("/api/login")
 async def login(body: LoginIn, response: Response, rt: Runtime = Depends(rt_dep)):
+    if rt.settings.email_login:
+        raise HTTPException(404, "sign in with an emailed code")
     if not hmac.compare_digest(body.password.encode(), rt.settings.password.get_secret_value().encode()):
         await asyncio.sleep(1)  # slows guessing
         raise HTTPException(401, "wrong password")
@@ -99,20 +187,162 @@ async def login(body: LoginIn, response: Response, rt: Runtime = Depends(rt_dep)
     return {"ok": True}
 
 
+@app.post("/api/login/code")
+async def login_code(body: EmailIn, rt: Runtime = Depends(rt_dep)):
+    """Mail a one-time code. The answer is the same for any address, so it never says whether one has an account."""
+    _email_mode(rt)
+    known = await users.by_email(rt, body.email)
+    if known is None:
+        return {"ok": True}
+    now = utcnow()
+    code = f"{secrets.randbelow(10**6):06d}"
+    async with rt.db.session(system=True) as s:
+        user = await s.get(User, known.id)
+        rec = user.login or {}
+        sent = [t for t in rec.get("sent", []) if now - datetime.fromisoformat(t) < timedelta(hours=1)]
+        if len(sent) >= CODES_PER_HOUR or (sent and now - datetime.fromisoformat(sent[-1]) < CODE_GAP):
+            raise HTTPException(429, "Wait a moment before asking for another code.")
+        user.login = {"hash": _code_hash(rt, code), "expires": (now + CODE_TTL).isoformat(), "tries": 0,
+                      "sent": [*sent, now.isoformat()]}
+        await s.commit()
+        to = user.email
+    try:
+        await mailer.send_code(rt.settings, to, code)
+    except Exception:
+        log.exception("could not email the sign-in code (check RIKI_SMTP_*)")  # not shown to the caller: see above
+    return {"ok": True}
+
+
+@app.post("/api/login/verify")
+async def login_verify(body: VerifyIn, response: Response, rt: Runtime = Depends(rt_dep)):
+    _email_mode(rt)
+    now = utcnow()
+    known = await users.by_email(rt, body.email)
+    async with rt.db.session(system=True) as s:
+        user = await s.get(User, known.id) if known else None
+        rec = dict(user.login or {}) if user else {}
+        live = bool(rec.get("hash")) and datetime.fromisoformat(rec["expires"]) > now and rec["tries"] < CODE_TRIES
+        if not (live and hmac.compare_digest(_code_hash(rt, body.code), rec["hash"])):
+            if live:
+                rec["tries"] += 1
+                user.login = rec
+                await s.commit()
+            await asyncio.sleep(1)  # slows guessing
+            raise HTTPException(401, "That code didn't work. Ask for a new one.")
+        rec["hash"] = None  # one use
+        user.login = rec
+        token = secrets.token_urlsafe(32)
+        s.add(Device(id=_digest(token), user_id=user.id, created_at=now, last_seen_at=now))
+        await s.commit()
+    response.set_cookie(COOKIE, token, httponly=True, samesite="strict", secure=rt.settings.cookie_secure, max_age=COOKIE_LIFE)
+    return {"ok": True}
+
+
 @app.post("/api/logout")
-async def logout(response: Response):
+async def logout(request: Request, response: Response, rt: Runtime = Depends(rt_dep)):
+    token = request.cookies.get(COOKIE, "")
+    if token and rt.settings.email_login:
+        async with rt.db.session(system=True) as s:
+            await s.execute(delete(Device).where(Device.id == _digest(token)))
+            await s.commit()
     response.delete_cookie(COOKIE)
     return {"ok": True}
 
 
+@app.post("/api/logout/all")
+async def logout_all(rt: AnyUser, response: Response):
+    """Forget every browser remembered for this person, this one included (a lost phone, a shared computer)."""
+    _email_mode(rt)
+    await users.sign_out_everywhere_for(rt, who().id)
+    response.delete_cookie(COOKIE)
+    return {"ok": True}
+
+
+# --- people -----------------------------------------------------------------------------------
+
+MemberId = Annotated[str, Field(pattern=r"^[0-9a-f]{32}$")]  # the owner's id is not one: they cannot be edited here
+
+
+class InviteIn(BaseModel):
+    email: str = Field(max_length=254, pattern=users.EMAIL.pattern)
+    name: str = Field(min_length=1, max_length=80)
+
+
+class UserPatch(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=80)
+    disabled: bool | None = None
+
+
+def _person(u: User) -> dict:
+    return {"id": u.id, "email": u.email, "name": u.name, "role": u.role, "disabled": u.disabled, "created_at": u.created_at}
+
+
+@app.get("/api/users")
+async def list_users(rt: Auth):
+    async with rt.db.session(system=True) as s:
+        return [_person(u) for u in (await s.scalars(select(User).order_by(User.created_at))).all()]
+
+
+@app.post("/api/users", status_code=201)
+async def invite_user(body: InviteIn, rt: Auth):
+    """Let someone sign in. Nothing is emailed: tell them the address, they ask for a code and they are in."""
+    if not rt.settings.email_login:
+        raise HTTPException(409, "Turn on email sign-in (RIKI_OWNER_EMAIL and RIKI_SMTP_*) before inviting people.")
+    try:
+        return _person(await users.invite(rt, body.email, body.name))
+    except IntegrityError:
+        raise HTTPException(409, "That email already has an account.")
+
+
+@app.patch("/api/users/{user_id}")
+async def edit_user(user_id: MemberId, body: UserPatch, rt: Auth):
+    async with rt.db.session(system=True) as s:
+        user = await s.get(User, user_id)
+        if user is None or user.role == "owner":
+            raise HTTPException(404, "no such person")
+        if body.name is not None:
+            user.name = body.name.strip()
+        if body.disabled is not None:
+            user.disabled = body.disabled
+        await s.commit()
+        out = _person(user)
+    if body.disabled:
+        await users.sign_out_everywhere_for(rt, user_id)  # signed out now, not at their next request
+    rt._member_prompts.clear()
+    return out
+
+
+@app.delete("/api/users/{user_id}")
+async def remove_user(user_id: MemberId, rt: Auth):
+    """Remove a person and everything of theirs: chats, files, runs, and their memory."""
+    async with rt.db.session(system=True) as s:
+        user = await s.get(User, user_id)
+        if user is None or user.role == "owner":
+            raise HTTPException(404, "no such person")
+        await s.delete(user)  # every table cascades from the user
+        await s.commit()
+    try:
+        await rt.memory.delete_user(user_id)
+    except Exception:
+        log.exception("removed %s but could not clear their memory", user_id)
+    return {"ok": True}
+
+
 @app.get("/api/me")
-async def me(rt: Auth):
+async def me(rt: AnyUser):
     s, p = rt.settings, rt.persona
+    person = who()
+    if person.member:  # a neutral Riki: nothing of the owner's persona, models or phone
+        return {"name": person.name, "agent_name": "Riki", "hue": 210, "model": "", "smart_model": "", "avatar": None,
+                "prompt_version": "", "max_depth": s.max_depth, "quiet_hours": s.quiet_hours, "timezone": s.timezone,
+                "default_effort": s.default_effort, "role": "", "onboarded": True, "telegram": False,
+                "email_login": True, "account": "member"}
     return {"name": s.user_name, "agent_name": p.name, "hue": p.hue, "model": s.model, "smart_model": s.smart_model,
             "avatar": f"/api/persona/avatar?v={int(p.updated_at.timestamp())}" if p.avatar_type else None,
             "prompt_version": rt.prompt_version, "max_depth": s.max_depth, "quiet_hours": s.quiet_hours,
             "timezone": s.timezone, "default_effort": s.default_effort, "role": p.role, "onboarded": p.onboarded,
-            "telegram": rt.telegram is not None and rt.telegram.chat_id is not None}
+            "telegram": rt.telegram is not None and rt.telegram.chat_id is not None,
+            "email_login": s.email_login, "account": "owner"}
 
 
 # --- persona and heartbeat --------------------------------------------------------------------
@@ -248,7 +478,7 @@ async def save_onboarding(body: OnboardingIn, rt: Auth):
         p.onboarded, p.updated_at = body.done, utcnow()
         await s.commit()
     if body.about.strip():  # extracted like any chat turn, so secrets and small talk are skipped the same way
-        rt.spawn(rt.memory.remember(rt.settings.user_id, body.about.strip(), "Noted.", name=rt.settings.user_name,
+        rt.spawn(rt.memory.remember(_uid(rt), body.about.strip(), "Noted.", name=rt.settings.user_name,
                                     turn_key=f"onboarding/{new_id()}"))
     await rt.reload_persona()
     return _onboarding(rt)
@@ -282,7 +512,7 @@ async def save_facts(body: FactsIn, rt: Auth):
     for fact in dict.fromkeys(" ".join(f.split()) for f in body.facts):
         if scrub(fact, "\0") != fact:  # a key-shaped string is never a fact about you
             continue
-        await rt.memory.save(MemoryCreate(user_id=rt.settings.user_id, content=clean(fact), kind="fact",
+        await rt.memory.save(MemoryCreate(user_id=_uid(rt), content=clean(fact), kind="fact",
                                           importance=3, source_key=source))
         saved += 1
     return {"saved": saved}
@@ -361,16 +591,17 @@ async def _approvals(rt: Runtime, status: str) -> list[dict]:
 
 
 @app.get("/api/approvals")
-async def approvals(rt: Auth, status: str = Query("pending", pattern="^(pending|decided)$")):
+async def approvals(rt: AnyUser, status: str = Query("pending", pattern="^(pending|decided)$")):
     """The approvals inbox: what is waiting on you, with what you asked for."""
     return await _approvals(rt, status)
 
 
 @app.get("/api/live")
-async def live(rt: Auth):
+async def live(rt: AnyUser):
     """What is happening right now, from the server's point of view: the shell polls this, so the status
     and any approval are right on every page and in every chat, not only where the run was started."""
-    return {"active": sorted(rt.active.values(), key=lambda a: a["started_at"]),
+    mine = [a for a in rt.active.values() if a.get("user_id") == _uid(rt)]
+    return {"active": sorted(mine, key=lambda a: a["started_at"]),
             "asks": await _approvals(rt, "pending")}
 
 
@@ -417,7 +648,7 @@ def _sse(event: dict) -> str:
 
 
 @app.post("/api/chat")
-async def chat(body: ChatIn, rt: Auth):
+async def chat(body: ChatIn, rt: AnyUser):
     """Streams run events (tokens, spans, approvals) as SSE. The run keeps going if the client drops, and
     GET /api/runs/{id}/stream picks it up again. A chat takes one message at a time."""
     thread_id = await ensure_thread(rt, body.thread_id, body.message or "Image")
@@ -425,7 +656,7 @@ async def chat(body: ChatIn, rt: Auth):
         raise HTTPException(409, {"message": "Riki is still working on your last message in this chat.",
                                   "run_id": busy.run_id})
     ctx = start_run(rt, thread_id, body.message, images=body.images, effort=body.effort, learn=body.learn)
-    if rt.telegram is not None and rt.telegram.chat_id is not None and thread_id == await own_thread(
+    if not who().member and rt.telegram is not None and rt.telegram.chat_id is not None and thread_id == await own_thread(
             rt, "telegram", "Telegram"):
         rt.spawn(rt.telegram.mirror(ctx))  # written in the app's Telegram chat: the answer also reaches the phone
     return _follow(ctx, 0, first={"type": "thread", "thread_id": thread_id, "run_id": ctx.run_id})
@@ -443,20 +674,20 @@ def _follow(ctx, start: int, first: dict | None = None) -> StreamingResponse:
 
 
 @app.get("/api/runs/{run_id}/stream")
-async def follow_run(run_id: HexId, rt: Auth, start: int = Query(0, ge=0, alias="from")):
+async def follow_run(run_id: HexId, rt: AnyUser, start: int = Query(0, ge=0, alias="from")):
     """Re-attach to a run (after navigating away, a refresh or a dropped connection): replays its events
     from ``from`` and goes on live. 404 once it has been finished for a while; its messages are in the chat."""
     entry = rt.runs.get(run_id)
-    if entry is None:
+    if entry is None or (entry[0].user_id or rt.settings.user_id) != _uid(rt):
         raise HTTPException(404, "this run is no longer live")
     return _follow(entry[0], start)
 
 
 @app.post("/api/runs/{run_id}/stop")
-async def stop_run(run_id: HexId, rt: Auth):
+async def stop_run(run_id: HexId, rt: AnyUser):
     """Stop a run that is working or waiting for an approval. It ends cleanly and says so in the chat."""
     entry = rt.runs.get(run_id)
-    if entry is None or entry[1].done():
+    if entry is None or entry[1].done() or (entry[0].user_id or rt.settings.user_id) != _uid(rt):
         raise HTTPException(409, "this run is not running")
     entry[1].cancel()
     return {"ok": True}
@@ -469,7 +700,7 @@ class DecisionIn(BaseModel):
 
 
 @app.post("/api/approvals/{approval_id}")
-async def decide(approval_id: HexId, body: DecisionIn, rt: Auth):
+async def decide(approval_id: HexId, body: DecisionIn, rt: AnyUser):
     if not await policy.decide(rt.db, approval_id, body.approve, answer=body.answer, grant=body.grant):
         raise HTTPException(409, "this approval is no longer pending")
     return {"ok": True}
@@ -503,7 +734,7 @@ async def _threads(rt: Runtime, kinds: list[str], limit: int) -> list[dict]:
 
 
 @app.get("/api/threads")
-async def threads(rt: Auth):
+async def threads(rt: AnyUser):
     """Side chats, most recently active first, each with its last message as a preview."""
     return await _threads(rt, ["side"], 200)
 
@@ -513,7 +744,7 @@ class RenameIn(BaseModel):
 
 
 @app.patch("/api/threads/{thread_id}")
-async def rename_thread(thread_id: HexId, body: RenameIn, rt: Auth):
+async def rename_thread(thread_id: HexId, body: RenameIn, rt: AnyUser):
     async with rt.db.session() as s:
         t = await s.get(Thread, thread_id)
         if t is None or t.kind != "side":
@@ -524,7 +755,7 @@ async def rename_thread(thread_id: HexId, body: RenameIn, rt: Auth):
 
 
 @app.get("/api/threads/main")
-async def main_thread(rt: Auth):
+async def main_thread(rt: AnyUser):
     """The one ongoing conversation (created on first use)."""
     async with rt.db.session() as s:
         t = await s.scalar(select(Thread).where(Thread.kind == "main").limit(1))
@@ -545,7 +776,7 @@ async def telegram_thread_(rt: Auth):
 
 
 @app.get("/api/threads/{thread_id}/messages")
-async def thread_messages(thread_id: HexId, rt: Auth):
+async def thread_messages(thread_id: HexId, rt: AnyUser):
     async with rt.db.session() as s:
         rows = (await s.scalars(select(Message).where(Message.thread_id == thread_id)
                                 .order_by(Message.created_at))).all()
@@ -572,7 +803,7 @@ async def thread_messages(thread_id: HexId, rt: Auth):
 
 
 @app.delete("/api/threads/{thread_id}")
-async def delete_thread(thread_id: HexId, rt: Auth):
+async def delete_thread(thread_id: HexId, rt: AnyUser):
     """Delete a topic chat. The main chat and the check-in thread are permanent, so for those the messages
     are cleared instead. What Riki learned stays in Memory; what it did stays in Activity."""
     if rt.active_run(thread_id):
@@ -590,7 +821,7 @@ async def delete_thread(thread_id: HexId, rt: Auth):
 
 
 @app.delete("/api/runs/{run_id}/messages/{role}")
-async def delete_message(run_id: HexId, role: Literal["user", "assistant"], rt: Auth):
+async def delete_message(run_id: HexId, role: Literal["user", "assistant"], rt: AnyUser):
     """Remove one message (your question or Riki's reply) from its chat. The run, its trace and anything learned
     from it stay in Activity and Memory."""
     async with rt.db.session() as s:
@@ -610,7 +841,7 @@ def _row(obj) -> dict:
 
 
 @app.get("/api/runs/{run_id}")
-async def run_detail(run_id: HexId, rt: Auth):
+async def run_detail(run_id: HexId, rt: AnyUser):
     async with rt.db.session() as s:
         run = await s.get(Run, run_id)
         if run is None:
@@ -628,7 +859,7 @@ class FeedbackIn(BaseModel):
 
 
 @app.post("/api/runs/{run_id}/feedback")
-async def feedback(run_id: HexId, body: FeedbackIn, rt: Auth):
+async def feedback(run_id: HexId, body: FeedbackIn, rt: AnyUser):
     async with rt.db.session() as s:
         if await s.get(Run, run_id) is None:
             raise HTTPException(404, "no such run")
@@ -673,7 +904,7 @@ async def _get_artifact(rt: Runtime, artifact_id: str) -> Artifact:
 
 
 @app.get("/api/artifacts")
-async def list_artifacts(rt: Auth, thread_id: HexId | None = None):
+async def list_artifacts(rt: AnyUser, thread_id: HexId | None = None):
     q = (select(Artifact.id, Artifact.thread_id, Artifact.run_id, Artifact.title, Artifact.kind, Artifact.updated_at)
          .where(Artifact.kind.in_(("md", "html"))).order_by(Artifact.updated_at.desc()).limit(200))
     async with rt.db.session() as s:
@@ -682,12 +913,12 @@ async def list_artifacts(rt: Auth, thread_id: HexId | None = None):
 
 
 @app.get("/api/artifacts/{artifact_id}")
-async def get_artifact(artifact_id: HexId, rt: Auth):
+async def get_artifact(artifact_id: HexId, rt: AnyUser):
     return _artifact(await _get_artifact(rt, artifact_id), content=True)
 
 
 @app.get("/api/artifacts/{artifact_id}/view")
-async def view_artifact(artifact_id: HexId, rt: Auth):
+async def view_artifact(artifact_id: HexId, rt: AnyUser):
     """The page as the agent wrote it, sandboxed, for the viewer's iframe."""
     a = await _get_artifact(rt, artifact_id)
     if a.kind != "html":
@@ -853,12 +1084,12 @@ def _memory(m) -> dict:
 
 
 @app.get("/api/memories")
-async def memories(rt: Auth, q: str = Query("", max_length=500), limit: int = Query(100, ge=1, le=500),
+async def memories(rt: AnyUser, q: str = Query("", max_length=500), limit: int = Query(100, ge=1, le=500),
                    offset: int = Query(0, ge=0)):
     if q:
-        found, _ = await rt.memory.recall(rt.settings.user_id, q)
+        found, _ = await rt.memory.recall(_uid(rt), q)
         return [_memory(m) for m in found]
-    return [_memory(m) for m in await rt.memory.list_memories(rt.settings.user_id, limit=limit, offset=offset)]
+    return [_memory(m) for m in await rt.memory.list_memories(_uid(rt), limit=limit, offset=offset)]
 
 
 class MemoryEditIn(BaseModel):
@@ -866,17 +1097,17 @@ class MemoryEditIn(BaseModel):
 
 
 @app.patch("/api/memories/{memory_id}")
-async def correct_memory(memory_id: HexId, body: MemoryEditIn, rt: Auth):
+async def correct_memory(memory_id: HexId, body: MemoryEditIn, rt: AnyUser):
     """"That's wrong": saves your wording as the new version; the old one is kept as history."""
-    m = await rt.memory.edit(rt.settings.user_id, memory_id, content=body.content.strip())
+    m = await rt.memory.edit(_uid(rt), memory_id, content=body.content.strip())
     if m is None:
         raise HTTPException(404, "no such memory")
     return _memory(m)
 
 
 @app.delete("/api/memories/{memory_id}")
-async def delete_memory(memory_id: HexId, rt: Auth):
-    return {"deleted": await rt.memory.delete(rt.settings.user_id, memory_id)}
+async def delete_memory(memory_id: HexId, rt: AnyUser):
+    return {"deleted": await rt.memory.delete(_uid(rt), memory_id)}
 
 
 # --- Riki's read on you, files, schedules, spend ----------------------------------------------
@@ -902,7 +1133,7 @@ async def put_reflection(body: ReflectionIn, rt: Auth):
 
 
 @app.post("/api/uploads")
-async def upload(request: Request, rt: Auth, name: str = Query("file", max_length=200)):
+async def upload(request: Request, rt: AnyUser, name: str = Query("file", max_length=200)):
     """A file to talk about (PDF, Word, Excel, CSV, text), sent as the raw request body. Riki reads it with read_file."""
     limit = rt.settings.upload_max_mb * 1024 * 1024
     data = bytearray()
@@ -1023,7 +1254,7 @@ async def revoke_grant(grant_id: HexId, rt: Auth):
 
 
 @app.get("/api/spend")
-async def spend(rt: Auth):
+async def spend(rt: AnyUser):
     """Today's spend against RIKI_DAILY_BUDGET_USD; only priced models count (RIKI_PRICES)."""
     return {"spent_usd": await spend_today(rt), "budget_usd": rt.settings.daily_budget_usd, "state": await budget_state(rt)}
 
@@ -1099,11 +1330,11 @@ def _day_start(rt: Runtime) -> datetime:
 
 
 async def _memories_since(rt: Runtime, since: datetime, limit: int = 200) -> list:
-    return [m for m in await rt.memory.list_memories(rt.settings.user_id, limit=limit) if m.created_at >= since]
+    return [m for m in await rt.memory.list_memories(_uid(rt), limit=limit) if m.created_at >= since]
 
 
 @app.get("/api/today")
-async def today(rt: Auth):
+async def today(rt: AnyUser):
     """The home screen: what needs you, what to continue, what Riki noticed and learned today."""
     start = _day_start(rt)
     async with rt.db.session() as s:
@@ -1123,7 +1354,8 @@ async def today(rt: Auth):
         "continue": await _threads(rt, ["main", "side"], 4),
         "nudge": {"run_id": beat_run.id, "at": beat_run.created_at, "text": beat_run.output}
         if beat_run and beat_run.created_at >= start else None,
-        "suggest": ROLES.get(rt.persona.role, {}).get("prompts", []),  # starters for what you said you use Riki for
+        # starters for what the owner said they use Riki for; a member has said nothing yet
+        "suggest": [] if who().member else ROLES.get(rt.persona.role, {}).get("prompts", []),
         "learned": {"count": len(learned), "items": [_memory(m) for m in learned[:3]]},
         "today": dict(counts),
     }
@@ -1157,13 +1389,13 @@ _RUNS_SQL = text("""
 
 async def _all_memories(rt: Runtime) -> list:
     out = []
-    while batch := await rt.memory.list_memories(rt.settings.user_id, limit=500, offset=len(out)):
+    while batch := await rt.memory.list_memories(_uid(rt), limit=500, offset=len(out)):
         out += batch
     return out
 
 
 @app.get("/api/activity")
-async def activity(rt: Auth, q: str = Query("", max_length=200), limit: int = Query(100, ge=1, le=500)):
+async def activity(rt: AnyUser, q: str = Query("", max_length=200), limit: int = Query(100, ge=1, le=500)):
     """Everything done on your behalf: requests Riki worked on (also the ones still going or that failed),
     actions that changed something (allowed, refused or failed) and memories learned."""
     pat = f"%{q}%" if q else ""
@@ -1171,13 +1403,13 @@ async def activity(rt: Auth, q: str = Query("", max_length=200), limit: int = Qu
         actions = [{"type": "action", **r} for r in (await s.execute(_ACTIVITY_SQL, {"pat": pat, "limit": limit})).mappings()]
         runs_ = [{"type": "run", **r} for r in (await s.execute(_RUNS_SQL, {"pat": pat, "limit": limit})).mappings()]
     memories = [{"type": "memory", "at": m.created_at, **_memory(m)}
-                for m in (await _all_memories(rt) if q else await rt.memory.list_memories(rt.settings.user_id, limit=limit))
+                for m in (await _all_memories(rt) if q else await rt.memory.list_memories(_uid(rt), limit=limit))
                 if not q or q.lower() in m.content.lower()]
     return sorted(actions + runs_ + memories, key=lambda e: e["at"], reverse=True)[:limit]
 
 
 @app.get("/api/export")
-async def export_all(rt: Auth):
+async def export_all(rt: AnyUser):
     """Everything Riki keeps about you, as one JSON file: chats, memories, actions, files, persona."""
     async with rt.db.session() as s:
         threads_ = (await s.scalars(select(Thread).order_by(Thread.created_at))).all()

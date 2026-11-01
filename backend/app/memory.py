@@ -7,7 +7,7 @@ from typing import get_origin
 from langchain_core.embeddings import Embeddings
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from riki_memory import telemetry
 
 
@@ -23,8 +23,15 @@ def lenient(schema):
                 pass
         return value
 
+    def unwrap(cls, value):
+        # some models answer {"parameters": {...}} (a tool-call envelope) instead of the object itself
+        if isinstance(value, dict) and isinstance(value.get("parameters"), dict) and not set(cls.model_fields) & set(value):
+            return value["parameters"]
+        return value
+
     return type(schema.__name__, (schema,), {"__module__": schema.__module__,
-                                             "_unquote": field_validator("*", mode="before")(classmethod(unquote))})
+                                             "_unquote": field_validator("*", mode="before")(classmethod(unquote)),
+                                             "_unwrap": model_validator(mode="before")(classmethod(unwrap))})
 
 
 class LangChainProvider:

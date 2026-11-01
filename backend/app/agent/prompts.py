@@ -145,6 +145,17 @@ TEMPLATES = {"rules": _RULES, "main": MAIN, "persona": PERSONA, "default_voice":
 PROMPT_VERSION = hashlib.sha256("".join(TEMPLATES.values()).encode()).hexdigest()[:12]
 
 
+# Appended after the owner's prompt text for a member (the owner's prompt itself is unchanged): the apps section above
+# does not apply to them, and the tools it names are not theirs.
+MEMBER_NOTE = """
+
+## Your account
+This Riki is shared: everyone has their own private account, and {name} is on one. Connecting apps and keys, files on the
+server, scheduled tasks and running code are not available on their account, whatever the Apps section above says. Never
+call connect_app or ask {name} for a key or token. If they ask for one of those, say it is not available for their account
+and offer what you can do: search the web, read pages and files they attach, remember what they tell you, write documents."""
+
+
 def main_prompt(name: str, catalog: str, agent: str = "Riki", soul: str = "", apps: str = "",
                 connected: str = "") -> str:
     persona = (PERSONA.format(name=name, soul=soul.strip()) if soul.strip()

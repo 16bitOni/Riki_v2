@@ -1,6 +1,6 @@
 // Small shared pieces: toasts and loading skeletons.
 
-import { X } from "lucide-react";
+import { X } from "@phosphor-icons/react";
 import { ReactNode, RefObject, useEffect, useRef, useState } from "react";
 
 /** A textarea that grows with its text (wrapped lines too) up to its CSS max-height, then scrolls. */

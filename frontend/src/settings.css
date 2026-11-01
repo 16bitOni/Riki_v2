@@ -2,14 +2,14 @@
 /* --- Settings v2: sections with a status line, switches, channels, spend charts ------------------------------------ */
 .settings-nav button { align-items: center; gap: 12px; }
 .nav-icon { color: var(--silver); flex: none; }
-.settings-nav button.on .nav-icon, .settings-nav button:hover .nav-icon { color: var(--snow); }
+.settings-nav button.on .nav-icon, .settings-nav button:hover .nav-icon { color: inherit; }
 .nav-text { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
 .nav-text small { --fs: 12; color: var(--steel); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; }
 .settings-nav button.on .nav-text small { color: var(--silver); }
 h2.first { margin-top: 8px; }
 .section-lead { margin-bottom: 18px; max-width: 62ch; }
 
-.settings-group { background: var(--smoke); border-radius: 18px; overflow: hidden; margin-bottom: 8px; }
+.settings-group { background: var(--smoke); border-radius: var(--r-md); overflow: hidden; margin-bottom: 8px; }
 h2.first + .settings-group, .settings-group > h2.first { margin-left: 0; }
 .setting { display: flex; align-items: center; gap: 16px; padding: 14px 18px; position: relative; }
 .setting + .setting::before { content: ""; position: absolute; top: 0; left: 18px; right: 0; border-top: 1px solid var(--hairline); }
@@ -22,24 +22,24 @@ h2.first + .settings-group, .settings-group > h2.first { margin-left: 0; }
 .money { display: inline-flex; align-items: center; gap: 4px; color: var(--silver); }
 .settings-group > h2 { margin: 16px 18px 6px; }
 
-.switch { width: 46px; height: 28px; padding: 0; border-radius: 980px; background: var(--ash); position: relative; transition: background 0.2s var(--ease); }
-.switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #fff; transition: transform 0.25s var(--spring); }
+.switch { width: 46px; height: 28px; padding: 0; border-radius: var(--r-pill); background: var(--ash); position: relative; transition: background 0.2s var(--ease); }
+.switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: var(--snow); transition: transform 0.25s var(--spring); }
 .switch:hover { background: var(--steel); }
 .switch.on, .switch.on:hover { background: var(--ok); }
 .switch.on::after { transform: translateX(18px); }
 
-.channel { background: var(--smoke); border-radius: 20px; padding: 18px; display: flex; flex-direction: column; gap: 14px; box-shadow: inset 0 0 0 1px transparent; transition: box-shadow 0.3s; }
-.channel.on { box-shadow: inset 0 0 0 1px rgba(95, 201, 146, 0.3); }
-.channel.pairing { box-shadow: inset 0 0 0 1px rgba(255, 194, 51, 0.35); }
+.channel { background: var(--smoke); border-radius: var(--r-md); padding: 18px; display: flex; flex-direction: column; gap: 14px; box-shadow: inset 0 0 0 1px transparent; transition: box-shadow 0.3s; }
+.channel.on { box-shadow: inset 0 0 0 1px rgba(107, 191, 146, 0.3); }
+.channel.pairing { box-shadow: inset 0 0 0 1px rgba(224, 176, 79, 0.35); }
 .channel-head { display: flex; align-items: center; gap: 14px; }
 .channel-head h3 { --fs: 17; }
-.channel-icon { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; background: var(--smoke); color: var(--focus); box-shadow: inset 0 0 0 1px var(--hairline-2); flex: none; }
+.channel-icon { width: 40px; height: 40px; border-radius: var(--r-sm); display: grid; place-items: center; background: var(--smoke); color: var(--focus); box-shadow: inset 0 0 0 1px var(--hairline-2); flex: none; }
 .channel-body { display: flex; flex-direction: column; gap: 14px; border-top: 1px solid var(--hairline); padding-top: 14px; }
 .steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; color: var(--silver); }
 .steps a { display: inline-flex; align-items: center; gap: 3px; }
-.pair-code { font-family: var(--mono); --fs: 34; letter-spacing: 0.12em; font-weight: 600; padding: 14px 18px; border-radius: 14px; background: var(--black); text-align: center; user-select: all; }
+.pair-code { font-family: var(--mono); --fs: 32; letter-spacing: 0.12em; font-weight: 600; padding: 14px 18px; border-radius: var(--r-sm); background: var(--black); text-align: center; user-select: all; }
 
-.spend-card { background: var(--smoke); border-radius: 18px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; }
+.spend-card { background: var(--smoke); border-radius: var(--r-md); padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; }
 .spend-now { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .meter { position: relative; height: 8px; border-radius: 4px; background: var(--ash); }
 .meter-fill { position: absolute; inset: 0 auto 0 0; border-radius: 4px; background: var(--focus); transition: width 0.5s var(--ease); }
@@ -48,7 +48,7 @@ h2.first + .settings-group, .settings-group > h2.first { margin-left: 0; }
 .meter-fill.error { background: var(--error); }
 .meter-tick { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--snow); opacity: 0.55; border-radius: 1px; }
 
-.chart { margin: 0; background: var(--smoke); border-radius: 18px; padding: 16px 18px 12px; }
+.chart { margin: 0; background: var(--smoke); border-radius: var(--r-md); padding: 16px 18px 12px; }
 .chart-plot { position: relative; }
 .chart-plot svg { display: block; width: 100%; height: 120px; overflow: visible; }
 .chart-grid { stroke: var(--hairline); stroke-dasharray: 3 4; vector-effect: non-scaling-stroke; }
@@ -58,7 +58,7 @@ h2.first + .settings-group, .settings-group > h2.first { margin-left: 0; }
 .chart-hit { fill: transparent; outline: none; }
 .chart-hit:focus-visible { fill: var(--hover); }
 .chart-max { position: absolute; top: -2px; left: 0; --fs: 11; color: var(--steel); background: var(--smoke); padding-right: 6px; transform: translateY(-50%); }
-.chart-tip { position: absolute; top: -8px; transform: translate(-50%, -100%); background: var(--black); border-radius: 8px; padding: 4px 9px; --fs: 12; white-space: nowrap; color: var(--silver); box-shadow: inset 0 0 0 1px var(--hairline-2); pointer-events: none; z-index: 2; }
+.chart-tip { position: absolute; top: -8px; transform: translate(-50%, -100%); background: var(--black); border-radius: var(--r-sm); padding: 4px 9px; --fs: 12; white-space: nowrap; color: var(--silver); box-shadow: inset 0 0 0 1px var(--hairline-2); pointer-events: none; z-index: 2; }
 .chart-tip b { color: var(--snow); font-weight: 600; margin-right: 4px; font-variant-numeric: tabular-nums; }
 .chart-axis { display: flex; justify-content: space-between; --fs: 11; color: var(--steel); margin-top: 6px; }
 .chart-table { margin-top: 8px; --fs: 12; color: var(--silver); }
@@ -79,9 +79,9 @@ h2.first + .settings-group, .settings-group > h2.first { margin-left: 0; }
 .price-model { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; --fs: 13; color: var(--silver); }
 .price-grid input { padding: 8px 10px; --fs: 14; }
 .scope { position: relative; }
-.scope-n { position: absolute; top: 14px; right: 16px; --fs: 22; font-weight: 600; color: var(--silver); font-variant-numeric: tabular-nums; }
+.scope-n { position: absolute; top: 14px; right: 16px; --fs: 20; font-weight: 600; color: var(--silver); font-variant-numeric: tabular-nums; }
 
-.chat-row-icon { flex: none; width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: var(--smoke); color: var(--focus); box-shadow: inset 0 0 0 1px var(--hairline-2); margin: 0 -2px 0 0; align-self: center; }
+.chat-row-icon { flex: none; width: 34px; height: 34px; border-radius: var(--r-sm); display: grid; place-items: center; background: var(--smoke); color: var(--focus); box-shadow: inset 0 0 0 1px var(--hairline-2); margin: 0 -2px 0 0; align-self: center; }
 .chat-row.tg .chat-row-open { flex-direction: row; align-items: center; gap: 12px; }
 .chat-row.tg .chat-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .chat-cta { margin-top: 16px; }

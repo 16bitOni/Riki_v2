@@ -1,6 +1,6 @@
 // Setup: what you use Riki for, the apps that matter for it, and what Riki can learn from them. You pick what it keeps.
 
-import { ShieldCheck } from "lucide-react";
+import { ShieldCheck } from "@phosphor-icons/react";
 import { FormEvent, useState } from "react";
 import { App, AppSheet, Tile } from "./Apps";
 import { Me, followRun, post } from "./api";

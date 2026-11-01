@@ -1,4 +1,4 @@
-import { ChevronRight, ImagePlus, Search, Trash2 } from "lucide-react";
+import { CaretRight as ChevronRight, ImageSquare as ImagePlus, MagnifyingGlass as Search, Trash as Trash2 } from "@phosphor-icons/react";
 import { DragEvent, ReactNode, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { ApprovalCard, Reply } from "./Activity";
@@ -284,6 +284,7 @@ export function PersonaSettings({ me, onSaved }: { me: Me; onSaved: () => void }
   };
   return (
     <>
+      <h2>Identity</h2>
       <p className="muted section-lead">Who {p.name || me.agent_name} is. The safety rules always come first.</p>
       <div className="persona">
         <div
@@ -449,7 +450,7 @@ export function MemoryPage({ me, onOpenThread }: { me: Me; onOpenThread: (id: st
       title="Memory"
       lead={`Everything ${me.agent_name} remembers about you, where it learned it, and when. Correct anything that's wrong; forget anything you'd rather it didn't keep.`}
     >
-      <ReadOnYou me={me} />
+      {me.account === "owner" && <ReadOnYou me={me} />}
       <form
         className="search"
         onSubmit={(e) => {

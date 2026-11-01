@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, ChevronDown, Copy, Gauge, Mic, PanelRight, Paperclip, Sparkles, Square, ThumbsDown, ThumbsUp, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, CaretDown as ChevronDown, Copy, Gauge, Microphone as Mic, SidebarSimple as PanelRight, Paperclip, Sparkle as Sparkles, Square, ThumbsDown, ThumbsUp, Trash as Trash2 } from "@phosphor-icons/react";
 import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import { Reply, RunDrawer, Steps, liveLine } from "./Activity";
 import { ArtifactCard, ArtifactView } from "./Artifacts";
@@ -452,6 +452,7 @@ export function Chat(props: {
         >
           <div className="column">
             <div className="chat-head">
+              <h2 className="chat-title">{props.title}</h2>
               <button className="chat-switch" onClick={props.onSwitch} aria-haspopup="dialog">
                 {props.title}
                 <ChevronDown size={15} aria-hidden="true" />
@@ -710,11 +711,11 @@ export function Chat(props: {
             )}
             {busy && live.runId ? (
               <button type="button" className="send stop" onClick={stop} aria-label="Stop" title="Stop">
-                <Square size={13} fill="currentColor" />
+                <Square size={13} weight="fill" />
               </button>
             ) : (
               <button className="send" disabled={busy || (!draft.trim() && !pics.length && !docs.length)} aria-label="Send">
-                <ArrowUp size={18} strokeWidth={2.5} />
+                <ArrowUp size={18} />
               </button>
             )}
           </form>

@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, SecretStr, field_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
@@ -35,6 +35,15 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://riki:riki@localhost:5433/riki"
     password: SecretStr = Field(description="Login password for the single user (min 12 chars).")
     cookie_secure: bool = False  # set true when served over HTTPS
+
+    # Sign in with a one-time code sent to your email instead of typing the password. Set the address and the SMTP
+    # account together (Gmail: smtp.gmail.com, port 587, your address, an app password). Neither = the password login.
+    owner_email: str | None = None
+    smtp_host: str | None = None
+    smtp_port: int = 587  # 465 = implicit TLS; anything else = STARTTLS (never plain text)
+    smtp_user: str | None = None
+    smtp_password: SecretStr | None = None
+    smtp_from: str | None = None  # defaults to smtp_user
 
     # Models use LangChain's "provider:model" strings, e.g. "openai:gpt-4.1-mini" or "bedrock_converse:<id>".
     model: str = "openai:gpt-4.1-mini"
@@ -90,6 +99,8 @@ class Settings(BaseSettings):
     # Riki thinking between chats (reflection, lessons, nudges). Background work pauses when the day's budget is 80% used.
     cognition: bool = True
     cognition_interval_h: float = Field(4, gt=0)
+    # A member's own daily cap (the owner's is daily_budget_usd). It only bites with RIKI_PRICES set: no price, no cost to count.
+    member_daily_budget_usd: float = Field(1.0, gt=0)
     daily_budget_usd: float | None = Field(None, gt=0)  # none = no cap; needs RIKI_PRICES to count anything
 
     # run_python: a throwaway Docker container with no network and a read-only disk. Off unless you switch it on.
@@ -100,6 +111,21 @@ class Settings(BaseSettings):
     def for_effort(self, effort: str) -> "Settings":
         """These settings with an effort level's caps applied; never raises a limit above what is configured."""
         return self.model_copy(update={k: min(getattr(self, k), v) for k, v in EFFORT[effort].items()})
+
+    @property
+    def email_login(self) -> bool:
+        return self.owner_email is not None
+
+    @model_validator(mode="after")
+    def email_login_is_complete(self) -> "Settings":
+        # Half a setup must not silently fall back to the password: say what is missing.
+        if (self.owner_email is None) != (self.smtp_host is None):
+            raise ValueError("RIKI_OWNER_EMAIL and RIKI_SMTP_HOST go together: set both for email sign-in, or neither")
+        if self.owner_email is not None and "@" not in self.owner_email:
+            raise ValueError("RIKI_OWNER_EMAIL is not an email address")
+        if self.smtp_host is not None and not (self.smtp_from or self.smtp_user):
+            raise ValueError("set RIKI_SMTP_USER or RIKI_SMTP_FROM: the code needs a sender")
+        return self
 
     @field_validator("password")
     @classmethod

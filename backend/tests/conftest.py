@@ -106,8 +106,10 @@ async def make_runtime(database):
     started: list[Runtime] = []
 
     async def factory(respond: Callable, extra_tools=(), verify: Callable | None = None, **overrides) -> Runtime:
-        settings = Settings(password="correct horse battery", database_url=database,
-                            mcp_config=BACKEND_DIR / "does-not-exist.json", **overrides)
+        # a developer's own .env (email sign-in, SMTP) must not leak into tests: they opt in with overrides
+        settings = Settings(**{"password": "correct horse battery", "database_url": database, "owner_email": None,
+                               "smtp_host": None, "smtp_user": None, "smtp_password": None, "smtp_from": None,
+                               "mcp_config": BACKEND_DIR / "does-not-exist.json", **overrides})
         model = ScriptedModel(respond=respond, **({"verify": verify} if verify else {}))
         rt = Runtime(settings, models={"fast": model, "smart": model}, memory=FakeMemory(), extra_tools=extra_tools)
         await rt.start()

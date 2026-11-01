@@ -18,6 +18,7 @@ from .checks import (NOT_EVIDENCE, citation_check, drop_found, evidence, groundi
                      worth_checking)
 from .db import Message, Run, Span, Thread, new_id, utcnow
 from .runtime import Runtime
+from .tenancy import who
 from .tracing import RUN, RunContext, clean, run_cost, scrub, span
 
 log = logging.getLogger(__name__)
@@ -157,8 +158,10 @@ def start_run(rt: Runtime, thread_id: str, text: str, *, source: str = "chat", l
               images: list[str] | None = None, effort: str | None = None, resume_of: str | None = None) -> RunContext:
     """Start one run in the background and register it, so any client can follow it (also after navigating
     away or refreshing), stop it, or be told it is busy. Finished runs stay followable for two minutes."""
-    ctx = RunContext(run_id=new_id(), source=source, thread_id=thread_id,
-                     effort=effort or rt.settings.default_effort)
+    person = who()
+    ctx = RunContext(run_id=new_id(), source=source, thread_id=thread_id, effort=effort or rt.settings.default_effort,
+                     user_id=person.id if person else rt.settings.user_id, member=bool(person and person.member),
+                     memory_user=person.id if person and person.member else "")
     task = rt.spawn(run_turn(rt, ctx, thread_id, text, learn=learn, images=images, resume_of=resume_of))
     rt.runs[ctx.run_id] = (ctx, task)
     task.add_done_callback(lambda _: asyncio.get_running_loop().call_later(120, rt.runs.pop, ctx.run_id, None))
@@ -206,12 +209,14 @@ async def run_turn(rt: Runtime, ctx: RunContext, thread_id: str, text: str, *, l
         await db.commit()
     ctx.emit("run_start", run_id=ctx.run_id, thread_id=thread_id)
     rt.active[ctx.run_id] = {"run_id": ctx.run_id, "thread_id": thread_id, "source": ctx.source,
-                             "input": text[:200], "started_at": utcnow()}
+                             "input": text[:200], "started_at": utcnow(), "user_id": ctx.user_id or s.user_id}
 
     cost = None
     output, status, error, known, unsupported = "", "ok", None, [], None
+    agent = "Riki" if ctx.member else rt.persona.name  # a member gets a neutral Riki, not the owner's persona
+    person_name = who().name if ctx.member and who() else s.user_name
     try:
-        memory_text, small = "", is_small_talk(text, rt.persona.name)
+        memory_text, small = "", is_small_talk(text, agent)
         if small:
             memory_text = await core_context(rt, memory_user)
         else:
@@ -220,7 +225,7 @@ async def run_turn(rt: Runtime, ctx: RunContext, thread_id: str, text: str, *, l
                     recent = "\n".join(f"{'User' if isinstance(m, HumanMessage) else 'Riki'}: {m.content}"
                                        for m in history[-4:])
                     memory_text, known = await asyncio.wait_for(
-                        rt.memory.context(memory_user, text, recent_chat=recent, name=s.user_name),
+                        rt.memory.context(memory_user, text, recent_chat=recent, name=person_name),
                         s.memory_timeout_s)
                     memory_text = with_ids(memory_text, known)
                     sp["output"] = memory_text
@@ -235,7 +240,7 @@ async def run_turn(rt: Runtime, ctx: RunContext, thread_id: str, text: str, *, l
         message = HumanMessage([{"type": "text", "text": framed},
                                 *({"type": "image_url", "image_url": {"url": u}} for u in images)] if images else framed)
         output = await asyncio.wait_for(
-            rt.agent.run(AgentSpec(rt.persona.name, rt.main_system, "fast", 0), [*history, message],
+            rt.agent.run(AgentSpec(agent, rt.system_for(ctx, person_name), "fast", 0), [*history, message],
                          [] if small else list(s.core_tools)), s.run_timeout_s)
         if not small and worth_checking(ctx.spans, output):
             unsupported = await check_grounding(rt, ctx, thread_id, text, output)

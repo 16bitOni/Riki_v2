@@ -105,6 +105,8 @@ export type Me = {
   role: string; // what you use Riki for (apps.json roles), "" until setup
   onboarded: boolean; // setup finished or skipped
   telegram: boolean; // a phone is paired
+  account: "owner" | "member"; // a member has private chats and memory, but not the owner's apps, files or settings
+  email_login: boolean; // signed in with an emailed code (so "sign out everywhere" exists)
 };
 
 export type TelegramStatus = {

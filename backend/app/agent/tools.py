@@ -43,6 +43,11 @@ def flatten_schema(schema: dict) -> dict:
     return {**{k: v for k, v in schema.items() if k not in _COMBINATORS}, "type": "object", "properties": props}
 
 
+# What a member never gets: the owner's connected apps and MCP servers (their mail, files, accounts), the code sandbox,
+# and scheduled tasks (which run as the owner). Enforced both when tools are offered and when one is called.
+MEMBER_BLOCKED = {"connect_app", "run_python", "schedule", "list_schedules", "cancel_schedule"}
+
+
 @dataclass
 class ToolEntry:
     tool: BaseTool
@@ -65,6 +70,10 @@ class ToolEntry:
         return self.risk
 
 
+def blocked_for_member(name: str, entry: ToolEntry) -> bool:
+    return name in MEMBER_BLOCKED or entry.source.startswith(("app:", "mcp:"))
+
+
 class ToolRegistry:
     def __init__(self) -> None:
         self.entries: dict[str, ToolEntry] = {}
@@ -85,12 +94,12 @@ class ToolRegistry:
         return list(dict.fromkeys(n2 for n in names for n2 in (
             sorted(k for k in self.entries if fnmatch.fnmatchcase(k, n)) if "*" in n else [n])))
 
-    def catalog(self, exclude: set[str]) -> str:
+    def catalog(self, exclude: set[str], members: bool = False) -> str:
         """One line per built-in tool, and one line per app or MCP server (they can have dozens of tools):
         cheap enough to keep in every system prompt, which every model call re-sends."""
         lines, apps = [], {}
         for name, e in sorted(self.entries.items()):
-            if name in exclude or e.risk == EXTERNAL:
+            if name in exclude or e.risk == EXTERNAL or (members and blocked_for_member(name, e)):
                 continue
             if e.source.startswith(("app:", "mcp:")):
                 app = e.source.split(":", 1)[1]

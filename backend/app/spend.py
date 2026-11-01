@@ -11,6 +11,8 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 
+from .tenancy import who
+
 from .db import Run
 
 _CACHE: dict[str, tuple[float, float]] = {}  # day -> (when read, dollars); the sum is cheap but not free
@@ -38,5 +40,6 @@ def state_for(spent: float, budget: float | None) -> str:
 
 
 async def budget_state(rt) -> str:
-    budget = rt.settings.daily_budget_usd
+    person = who()
+    budget = rt.settings.member_daily_budget_usd if person and person.member else rt.settings.daily_budget_usd
     return state_for(await spend_today(rt), budget) if budget else "ok"

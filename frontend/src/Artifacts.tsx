@@ -1,4 +1,4 @@
-import { Download, FileText, Globe, Printer } from "lucide-react";
+import { DownloadSimple as Download, FileText, Globe, Printer } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import { Reply } from "./Activity";
 import { Artifact, api } from "./api";

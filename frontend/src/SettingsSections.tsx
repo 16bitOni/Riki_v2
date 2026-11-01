@@ -1,7 +1,7 @@
 // The Settings sections that are about control: your name and time zone, Telegram, how much Riki thinks and spends,
 // and what it may do. Every control saves on its own, takes effect at once, and can go back to what .env says.
 
-import { Check, Download, ExternalLink, Send, ShieldCheck, ShieldOff, ShieldQuestion, Smartphone } from "lucide-react";
+import { Check, DownloadSimple as Download, ArrowSquareOut as ExternalLink, PaperPlaneTilt as Send, ShieldCheck, ShieldSlash as ShieldOff, ShieldWarning as ShieldQuestion, DeviceMobile as Smartphone } from "@phosphor-icons/react";
 import { ReactNode, useState } from "react";
 import { BarChart, Meter, Split } from "./Charts";
 import { Effort, Me, SettingsValues, SettingsView, Status, TelegramStatus, ago, del, dollars, post, put, shortModel } from "./api";

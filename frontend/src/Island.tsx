@@ -1,7 +1,7 @@
 // The Island: a black pill under the tab bar that appears only when something is happening.
 // Working: what Riki is doing. Needs you: the decision itself, right there. Done: a brief check.
 
-import { Check, CircleAlert } from "lucide-react";
+import { Check, WarningCircle as CircleAlert } from "@phosphor-icons/react";
 import { ApprovalCard } from "./Activity";
 import { ApprovalReq, Me } from "./api";
 import { Avatar, Mood } from "./Avatar";

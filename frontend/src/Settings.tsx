@@ -1,16 +1,17 @@
 // Settings: everything you can control, one line of status per section, and every change takes effect at once.
 
-import { Activity, Brain, CalendarClock, ChevronLeft, ChevronRight, Send, ShieldCheck, UserRound, Wrench } from "lucide-react";
+import { Pulse as Activity, Brain, UsersThree, CalendarCheck as CalendarClock, CaretLeft as ChevronLeft, CaretRight as ChevronRight, PaperPlaneTilt as Send, ShieldCheck, User as UserRound, Wrench } from "@phosphor-icons/react";
 import { useState } from "react";
 import { Me, SettingsView, Status, TelegramStatus, dollars } from "./api";
 import { Mood } from "./Avatar";
+import { People } from "./People";
 import { CheckIns, Logs, Overview, PersonaSettings, Quality, Tools, useLoad } from "./Pages";
 import { About, Channels, Permissions, Thinking } from "./SettingsSections";
 import { Skeleton } from "./ui";
 
-export const TABS = ["Persona", "Check-ins", "Channels", "Thinking & spend", "Permissions & data", "Tools", "Diagnostics"] as const;
+export const TABS = ["Persona", "Check-ins", "Channels", "Thinking & spend", "Permissions & data", "People", "Tools", "Diagnostics"] as const;
 export type Tab = (typeof TABS)[number];
-const ICONS = { Persona: UserRound, "Check-ins": CalendarClock, Channels: Send, "Thinking & spend": Brain, "Permissions & data": ShieldCheck, Tools: Wrench, Diagnostics: Activity } as const;
+const ICONS = { Persona: UserRound, "Check-ins": CalendarClock, Channels: Send, "Thinking & spend": Brain, "Permissions & data": ShieldCheck, People: UsersThree, Tools: Wrench, Diagnostics: Activity } as const;
 const DIAG = ["Health", "Logs", "Quality"] as const;
 
 export function SettingsPage(props: { me: Me; status: Status | null; mood: Mood; onSaved: () => void; tab?: Tab; onOpenTelegram: () => void }) {
@@ -29,6 +30,7 @@ export function SettingsPage(props: { me: Me; status: Status | null; mood: Mood;
     Channels: !tg ? "" : tg.paired ? "Telegram connected" : tg.connected ? "Finish pairing" : "Not connected",
     "Thinking & spend": settings ? `${dollars(spend?.spent_usd ?? 0) || "$0"} today${settings.values.cognition ? "" : " · thinking off"}` : "",
     "Permissions & data": status ? `${status.tools.by_risk.write ?? 0} ask first` : "",
+    People: "Invite and manage",
     Tools: status ? `${status.tools.total} tools` : "",
     Diagnostics: status ? (status.ok ? "All good" : "Needs attention") : "",
   };
@@ -41,7 +43,7 @@ export function SettingsPage(props: { me: Me; status: Status | null; mood: Mood;
           const Icon = ICONS[t];
           return (
             <button key={t} aria-current={t === tab ? "page" : undefined} className={t === tab ? "on" : ""} onClick={() => { setTab(t); setView("detail"); }}>
-              <Icon size={17} strokeWidth={1.8} aria-hidden="true" className="nav-icon" />
+              <Icon size={17} aria-hidden="true" className="nav-icon" />
               <span className="nav-text">
                 <span>{t}</span>
                 {summary[t] && <small>{summary[t]}</small>}
@@ -67,6 +69,7 @@ export function SettingsPage(props: { me: Me; status: Status | null; mood: Mood;
         {tab === "Channels" && <Channels me={me} tg={tg} reload={() => (reloadTg(), props.onSaved())} onOpenChat={props.onOpenTelegram} />}
         {tab === "Thinking & spend" && (settings ? <Thinking me={me} view={settings} reload={changed} /> : <Skeleton lines={6} />)}
         {tab === "Permissions & data" && (settings ? <Permissions me={me} status={status} view={settings} reload={changed} /> : <Skeleton lines={6} />)}
+        {tab === "People" && <People />}
         {tab === "Tools" && <Tools />}
         {tab === "Diagnostics" && (
           <>

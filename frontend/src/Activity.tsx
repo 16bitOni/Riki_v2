@@ -1,7 +1,7 @@
 // The three status layers. Layer 1: one sentence (liveLine). Layer 2: the steps under a reply (Steps).
 // Layer 3: the full trace with numbers (RunDrawer). Same data, three depths.
 
-import { Check, ChevronDown, CircleAlert, Minus, X } from "lucide-react";
+import { Check, CaretDown as ChevronDown, WarningCircle as CircleAlert, Minus, X } from "@phosphor-icons/react";
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -50,9 +50,9 @@ export function liveLine(spans: Span[], approvals: ApprovalReq[], agentName: str
 }
 
 const ICON: Record<string, JSX.Element | null> = {
-  ok: <Check size={13} strokeWidth={2.5} />,
+  ok: <Check size={13} />,
   error: <CircleAlert size={13} />,
-  denied: <Minus size={13} strokeWidth={2.5} />,
+  denied: <Minus size={13} />,
   running: null,
 };
 

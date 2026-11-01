@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 
 from ..tracing import RUN, span
 from .policy import ASK, EXTERNAL, SAFE, authorize, record_result
-from .tools import ToolEntry
+from .tools import ToolEntry, blocked_for_member
 
 if TYPE_CHECKING:
     from ..config import Settings
@@ -155,7 +155,7 @@ class Agent:
             base = SUB_AGENT_BASE_TOOLS + (["spawn_agent"] if depth < s.max_depth else [])
             names = [n for n in dict.fromkeys(base + (tools or [])) if self.offerable(n, depth)]
             prompt = f"{context}\n\nTask: {task}" if context else task
-            spec = AgentSpec(f"sub-agent: {task[:80]}", self.rt.sub_system, "smart" if smart else "fast", depth)
+            spec = AgentSpec(f"sub-agent: {task[:80]}", self.rt.system_for(RUN.get(), None, sub=True), "smart" if smart else "fast", depth)
             return await self.run(spec, [HumanMessage(prompt)], names)
 
         @tool(args_schema=LoadArgs)
@@ -176,6 +176,9 @@ class Agent:
     def offerable(self, name: str, depth: int) -> bool:
         entry = self.rt.registry.get(name)
         if entry is None or entry.risk == EXTERNAL:  # external tools are never even shown to a model
+            return False
+        ctx = RUN.get(None)
+        if ctx is not None and ctx.member and blocked_for_member(name, entry):
             return False
         if name in ("connect_app", ASK):  # only the agent talking to the user can put a card in front of them
             return depth == 0
@@ -263,7 +266,7 @@ class Agent:
         risk = entry.risk_for(args) if entry else None
         async with span("tool", name, input=args, risk=risk) as sp:
             sp["ref"] = ref = ctx.next_ref()
-            if entry is None or name not in active:
+            if entry is None or name not in active or (ctx.member and blocked_for_member(name, entry)):
                 sp["status"] = "error"
                 text = f"Tool '{name}' {NOT_LOADED}. Use load_tools with a catalog name first."
             elif repeated:  # same tool, same arguments as an earlier step of this agent: the loop breaker
